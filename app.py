@@ -182,14 +182,19 @@ if st.session_state.get("processado", False):
         nx.draw_networkx_nodes(G, pos, node_color='#2c3e50', node_size=600, ax=ax_net)
         nx.draw_networkx_labels(G, pos, font_size=8, font_weight="bold", font_color="white", ax=ax_net)
         
-        edge_plot = nx.draw_networkx_edges(
+        nx.draw_networkx_edges(
             G, pos, edgelist=edges, edge_color=weights,
             edge_cmap=plt.cm.jet, edge_vmin=vmin, edge_vmax=vmax,
             width=3, arrows=True, arrowsize=15, ax=ax_net
         )
         nx.draw_networkx_edge_labels(G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), font_size=7, ax=ax_net)
         
-        cbar = plt.colorbar(edge_plot, ax=ax_net, fraction=0.046, pad=0.04)
+        # --- CORREÇÃO DO COLORBAR ---
+        # Cria um objeto mapeador genérico (ScalarMappable) para não travar com as setas
+        sm = plt.cm.ScalarMappable(cmap=plt.cm.jet, norm=plt.Normalize(vmin=vmin, vmax=vmax))
+        sm.set_array([]) 
+        
+        cbar = plt.colorbar(sm, ax=ax_net, fraction=0.046, pad=0.04)
         cbar.set_label('Perda de Carga Total (mca)', rotation=270, labelpad=15)
         ax_net.set_title("Esquema da Rede (Mapa de Calor de Perdas)")
         ax_net.axis('off')
@@ -339,13 +344,11 @@ if st.session_state.get("processado", False):
                 pdf.cell(40, 8, str(row['Quantidade Total']), border=1, align='C')
                 pdf.ln()
 
-        # Adicionando os Gráficos
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(0, 10, txt="4. Diagramas Hidraulicos", ln=True, align='C')
         pdf.ln(5)
 
-        # Salva as figuras em arquivos temporários
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_net:
             f_net.savefig(tmp_net.name, format="png", bbox_inches="tight", dpi=150)
             path_net = tmp_net.name
@@ -354,12 +357,10 @@ if st.session_state.get("processado", False):
             f_bar.savefig(tmp_bar.name, format="png", bbox_inches="tight", dpi=150)
             path_bar = tmp_bar.name
 
-        # Insere imagens no PDF
         pdf.image(path_net, x=35, y=pdf.get_y(), w=140)
         pdf.ln(110)
         pdf.image(path_bar, x=35, y=pdf.get_y(), w=140)
 
-        # Apaga os temporários para não lotar a memória do servidor
         os.remove(path_net)
         os.remove(path_bar)
 
