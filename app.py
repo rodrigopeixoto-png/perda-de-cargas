@@ -35,11 +35,25 @@ with st.sidebar:
     st.write("Valores de Material (C):")
     st.json(MATERIAIS_C)
 
+# --- CONDIÇÕES DE ENTRADA (NOVO) ---
+st.subheader("🚰 Condições Iniciais (Concessionária)")
+col_e1, col_e2 = st.columns(2)
+with col_e1:
+    pressao_rua = st.number_input("Pressão Disponível na Rua (mca)", min_value=0.0, value=12.0)
+with col_e2:
+    tipo_entrada = st.selectbox(
+        "Estrutura de Entrada (Cavalete)", 
+        ["Ligação Direta (K=0)", "Cavalete com Hidrômetro 1/2\" (K=15.0)", "Cavalete com Hidrômetro 3/4\" (K=10.0)"]
+    )
+    # Extrai o valor de K da string selecionada
+    k_entrada = float(tipo_entrada.split("K=")[1].replace(")", ""))
+
+st.divider()
+
 # --- PLANILHA INTERATIVA DE ENTRADA ---
 st.subheader("✏️ Desenho da Rede (Planilha Interativa)")
-st.write("Adicione novos trechos clicando na última linha vazia. Você pode editar, copiar e colar dados diretamente.")
+st.write("Adicione novos trechos clicando na última linha vazia.")
 
-# Inicializar o dataframe padrão se não existir
 if 'df_input' not in st.session_state:
     st.session_state.df_input = pd.DataFrame([{
         "Origem": "A", "Destino": "B", "Comprimento (m)": 10.0,
@@ -47,35 +61,24 @@ if 'df_input' not in st.session_state:
         "Material": "PVC", "Soma K (Conexões)": 0.9
     }])
 
-# O st.data_editor permite edição dinâmica como no Excel
 edited_df = st.data_editor(
     st.session_state.df_input,
     num_rows="dynamic",
     use_container_width=True,
     column_config={
-        "Material": st.column_config.SelectboxColumn(
-            "Material", help="Selecione o material da tubulação",
-            options=list(MATERIAIS_C.keys()), required=True
-        ),
-        "Soma K (Conexões)": st.column_config.NumberColumn(
-            "Soma K (Conexões)", help="Soma dos coeficientes de perda localizada",
-            min_value=0.0, format="%.2f"
-        )
+        "Material": st.column_config.SelectboxColumn("Material", options=list(MATERIAIS_C.keys()), required=True),
+        "Soma K (Conexões)": st.column_config.NumberColumn("Soma K (Conexões)", min_value=0.0, format="%.2f")
     }
 )
 
-# Salva as edições no estado
 st.session_state.df_input = edited_df
 
 # --- CÁLCULO E RESULTADOS ---
 if not edited_df.empty and st.button("🚀 Calcular Rede e Dimensionar Bomba", type="primary"):
     
-    # 1. Cálculos Hidráulicos
     resultados = []
     for _, t in edited_df.iterrows():
-        # Ignorar linhas vazias acidentais
-        if pd.isna(t["Origem"]) or pd.isna(t["Destino"]):
-            continue
+        if pd.isna(t["Origem"]) or pd.isna(t["Destino"]): continue
             
         Q_m3s = t["Vazão (L/s)"] / 1000
         D_m = t["Diâmetro (mm)"] / 1000
@@ -102,7 +105,6 @@ if not edited_df.empty and st.button("🚀 Calcular Rede e Dimensionar Bomba", t
     
     st.divider()
     
-    # 2. Exibição dos Resultados e Grafo
     col1, col2 = st.columns([2, 1])
     with col1:
         st.subheader("📋 Resultados Detalhados")
@@ -123,7 +125,7 @@ if not edited_df.empty and st.button("🚀 Calcular Rede e Dimensionar Bomba", t
             
     st.divider()
 
-    # 3. Módulo da Bomba
+    # --- MÓDULO DA BOMBA COM PRESSÃO DA RUA ---
     st.subheader("⚙️ Dimensionamento da Bomba Centrífuga")
     col_b1, col_b2 = st.columns(2)
     
@@ -135,49 +137,24 @@ if not edited_df.empty and st.button("🚀 Calcular Rede e Dimensionar Bomba", t
         vazao_max = float(df_resultados['Vazão (L/s)'].max()) if not df_resultados.empty else 2.0
         vazao_bomba = st.number_input("Vazão de Projeto da Bomba (L/s)", min_value=0.1, value=vazao_max)
         
+        # Calcula perda específica do hidrômetro usando a velocidade do primeiro trecho
+        v_inicial = df_resultados['Velocidade (m/s)'].iloc[0] if not df_resultados.empty else 0
+        perda_entrada_mca = k_entrada * (v_inicial ** 2) / (2 * 9.81)
+        
         perda_carga_total = df_resultados['Total (mca)'].sum() if not df_resultados.empty else 0
-        amt = desnivel + perda_carga_total
-        potencia_cv = ((vazao_bomba / 1000) * amt * 1000) / (75 * rendimento)
+        perda_sistema_completo = perda_carga_total + perda_entrada_mca
+        pressao_necessaria = desnivel + perda_sistema_completo
         
-        st.info(f"**Altura Manométrica Total (AMT):** {amt:.2f} mca")
-        st.success(f"**Potência Estimada:** {potencia_cv:.2f} cv")
-
-    # 4. Geração do PDF
-    def gerar_pdf(df, amt_val, pot_val, des_val):
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", 'B', 16)
-        pdf.cell(200, 10, txt="Relatorio de Dimensionamento Hidraulico", ln=True, align='C')
-        pdf.ln(10)
+        # Desconta a pressão da rua
+        amt_bomba = pressao_necessaria - pressao_rua
         
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(200, 10, txt="1. Perda de Carga por Trecho", ln=True)
-        pdf.set_font("Arial", size=10)
+        st.write(f"**Perda de Carga do Sistema + Cavalete:** {perda_sistema_completo:.2f} mca")
+        st.write(f"**Pressão Total Necessária:** {pressao_necessaria:.2f} mca")
         
-        colunas = ["Trecho", "Vazao", "Velocidade", "P.Dist", "P.Loc", "Total"]
-        larguras = [30, 25, 25, 35, 35, 35]
-        for col, larg in zip(colunas, larguras):
-            pdf.cell(larg, 10, col, border=1, align='C')
-        pdf.ln()
-        
-        for _, row in df.iterrows():
-            pdf.cell(larguras[0], 10, str(row['Trecho']), border=1, align='C')
-            pdf.cell(larguras[1], 10, str(row['Vazão (L/s)']), border=1, align='C')
-            pdf.cell(larguras[2], 10, str(row['Velocidade (m/s)']), border=1, align='C')
-            pdf.cell(larguras[3], 10, str(row['P. Distr. (mca)']), border=1, align='C')
-            pdf.cell(larguras[4], 10, str(row['P. Local. (mca)']), border=1, align='C')
-            pdf.cell(larguras[5], 10, str(row['Total (mca)']), border=1, align='C')
-            pdf.ln()
-            
-        pdf.ln(10)
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(200, 10, txt="2. Dimensionamento da Bomba", ln=True)
-        pdf.set_font("Arial", size=10)
-        pdf.cell(200, 8, txt=f"Desnivel Geometrico: {des_val:.2f} m", ln=True)
-        pdf.cell(200, 8, txt=f"Altura Manometrica Total (AMT): {amt_val:.2f} mca", ln=True)
-        pdf.cell(200, 8, txt=f"Potencia Estimada: {pot_val:.2f} cv", ln=True)
-        return pdf.output(dest='S').encode('latin-1')
-
-    if not df_resultados.empty:
-        pdf_bytes = gerar_pdf(df_resultados, amt, potencia_cv, desnivel)
-        st.download_button("Baixar Relatório em PDF", pdf_bytes, "relatorio_hidraulico.pdf", "application/pdf")
+        if amt_bomba <= 0:
+            st.success(f"✅ **Bomba Desnecessária:** A pressão da rua ({pressao_rua} mca) atende à demanda do sistema com folga de {abs(amt_bomba):.2f} mca.")
+            potencia_cv = 0.0
+        else:
+            potencia_cv = ((vazao_bomba / 1000) * amt_bomba * 1000) / (75 * rendimento)
+            st.warning(f"**Altura Manométrica Restante (AMT da Bomba):** {amt_bomba:.2f} mca")
+            st.error(f"**Potência Estimada:** {potencia_cv:.2f} cv")
