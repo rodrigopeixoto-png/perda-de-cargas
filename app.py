@@ -98,7 +98,13 @@ for i, t in enumerate(st.session_state.trechos):
         with st.expander(f"🛠️ Selecionar Conexões ({t['Origem']} -> {t['Destino']}) - DN Aproximado: {get_dn_mais_proximo(t['Diâmetro'])}"):
             ccols = st.columns(4)
             for j, nome_con in enumerate(COMPRIMENTOS_EQUIVALENTES.keys()):
-                qtd = ccols[j % 4].number_input(f"{nome_con}", 0, 50, t.get("Conexoes", {}).get(nome_con, 0), key=f"cx_{i}_{nome_con}")
+                # Usamos .get() para garantir que chaves antigas não quebrem a interface
+                qtd_atual = t.get("Conexoes", {}).get(nome_con, 0)
+                qtd = ccols[j % 4].number_input(f"{nome_con}", 0, 50, int(qtd_atual), key=f"cx_{i}_{nome_con}")
+                
+                # Garante que o dicionário de conexões interno exista
+                if "Conexoes" not in t:
+                    t["Conexoes"] = {}
                 t["Conexoes"][nome_con] = qtd
 
 st.divider()
@@ -115,12 +121,14 @@ if st.button("🚀 Processar Simulação Completa", type="primary", use_containe
         Q_m3s = t["Vazão"] / 1000
         D_m = t["Diâmetro"] / 1000
         L_fisico = t["Comprimento"]
-        C = MATERIAIS_C[t["Material"]]
+        C = MATERIAIS_C.get(t["Material"], 150)
         dn_aprox = get_dn_mais_proximo(t["Diâmetro"])
         
         L_eq_total = 0.0
-        for nome_con, qtd in t["Conexoes"].items():
-            if qtd > 0:
+        # TRAVA DE SEGURANÇA: Adicionado "and nome_con in COMPRIMENTOS_EQUIVALENTES"
+        # para ignorar dados velhos no cache de sessão.
+        for nome_con, qtd in t.get("Conexoes", {}).items():
+            if qtd > 0 and nome_con in COMPRIMENTOS_EQUIVALENTES:
                 L_eq_total += qtd * COMPRIMENTOS_EQUIVALENTES[nome_con][dn_aprox]
                 conexoes_totais[nome_con] += qtd
 
