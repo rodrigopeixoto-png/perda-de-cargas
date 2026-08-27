@@ -98,11 +98,8 @@ for i, t in enumerate(st.session_state.trechos):
         with st.expander(f"🛠️ Selecionar Conexões ({t['Origem']} -> {t['Destino']}) - DN Aproximado: {get_dn_mais_proximo(t['Diâmetro'])}"):
             ccols = st.columns(4)
             for j, nome_con in enumerate(COMPRIMENTOS_EQUIVALENTES.keys()):
-                # Usamos .get() para garantir que chaves antigas não quebrem a interface
                 qtd_atual = t.get("Conexoes", {}).get(nome_con, 0)
                 qtd = ccols[j % 4].number_input(f"{nome_con}", 0, 50, int(qtd_atual), key=f"cx_{i}_{nome_con}")
-                
-                # Garante que o dicionário de conexões interno exista
                 if "Conexoes" not in t:
                     t["Conexoes"] = {}
                 t["Conexoes"][nome_con] = qtd
@@ -110,7 +107,12 @@ for i, t in enumerate(st.session_state.trechos):
 st.divider()
 
 # --- 3. PROCESSAMENTO ---
+# Salva na memória que o botão foi clicado
 if st.button("🚀 Processar Simulação Completa", type="primary", use_container_width=True):
+    st.session_state.processado = True
+
+# Só exibe os resultados se o botão já foi clicado alguma vez
+if st.session_state.get("processado", False):
     resultados = []
     tubos_agrupados = {}
     conexoes_totais = {k: 0 for k in COMPRIMENTOS_EQUIVALENTES.keys()}
@@ -125,8 +127,6 @@ if st.button("🚀 Processar Simulação Completa", type="primary", use_containe
         dn_aprox = get_dn_mais_proximo(t["Diâmetro"])
         
         L_eq_total = 0.0
-        # TRAVA DE SEGURANÇA: Adicionado "and nome_con in COMPRIMENTOS_EQUIVALENTES"
-        # para ignorar dados velhos no cache de sessão.
         for nome_con, qtd in t.get("Conexoes", {}).items():
             if qtd > 0 and nome_con in COMPRIMENTOS_EQUIVALENTES:
                 L_eq_total += qtd * COMPRIMENTOS_EQUIVALENTES[nome_con][dn_aprox]
