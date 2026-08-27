@@ -4,6 +4,8 @@ import math
 import networkx as nx
 import matplotlib.pyplot as plt
 from fpdf import FPDF
+import tempfile
+import os
 
 # --- BANCO DE DADOS DE MATERIAIS ---
 MATERIAIS_C = {
@@ -107,11 +109,9 @@ for i, t in enumerate(st.session_state.trechos):
 st.divider()
 
 # --- 3. PROCESSAMENTO ---
-# Salva na memória que o botão foi clicado
 if st.button("🚀 Processar Simulação Completa", type="primary", use_container_width=True):
     st.session_state.processado = True
 
-# Só exibe os resultados se o botão já foi clicado alguma vez
 if st.session_state.get("processado", False):
     resultados = []
     tubos_agrupados = {}
@@ -140,6 +140,7 @@ if st.session_state.get("processado", False):
         hf_localizada = fator_hw * L_eq_total
         
         resultados.append({
+            "Origem": t['Origem'], "Destino": t['Destino'],
             "Trecho": f"{t['Origem']} -> {t['Destino']}", "Diam(mm)": t["Diâmetro"],
             "Q(L/s)": round(t["Vazão"], 2), "Vel(m/s)": round(v, 2), "Leq(m)": round(L_eq_total, 2),
             "P. Distr(mca)": round(hf_distribuida, 3), "P. Local(mca)": round(hf_localizada, 3), 
@@ -153,23 +154,61 @@ if st.session_state.get("processado", False):
     df_tubos = pd.DataFrame(list(tubos_agrupados.items()), columns=["Especificação", "Comprimento Físico (m)"])
     df_conexoes = pd.DataFrame([(k, v) for k, v in conexoes_totais.items() if v > 0], columns=["Conexão", "Quantidade Total"])
     
-    col_r1, col_r2 = st.columns([5, 2])
-    with col_r1:
-        st.subheader("📋 Resumo Hidráulico")
-        st.dataframe(df_resultados, use_container_width=True)
-    with col_r2:
-        st.subheader("🗺️ Diagrama")
-        G = nx.DiGraph()
-        for t in st.session_state.trechos:
-            if t["Origem"] and t["Destino"]:
-                G.add_edge(t["Origem"], t["Destino"], label=f"D={t['Diâmetro']}")
-        if len(G.nodes) > 0:
-            fig, ax = plt.subplots(figsize=(4, 4))
-            pos = nx.spring_layout(G)
-            nx.draw(G, pos, with_labels=True, node_color='#4CA1AF', node_size=1000, edge_color='gray', font_size=8, arrows=True, ax=ax)
-            nx.draw_networkx_edge_labels(G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), font_size=7)
-            st.pyplot(fig)
-            
+    st.subheader("📋 Resumo Hidráulico")
+    st.dataframe(df_resultados.drop(columns=['Origem', 'Destino']), use_container_width=True)
+
+    # --- DIAGRAMAS (ESTILO EPANET) ---
+    st.subheader("🗺️ Diagramas de Pressão e Perda de Carga")
+    col_d1, col_d2 = st.columns(2)
+    
+    # 1. Mapa de Calor da Rede (NetworkX)
+    G = nx.DiGraph()
+    if not df_resultados.empty:
+        for _, row in df_resultados.iterrows():
+            G.add_edge(row["Origem"], row["Destino"], weight=row['Total(mca)'], 
+                       label=f"D={row['Diam(mm)']}\nhf={row['Total(mca)']}mca")
+    
+    fig_net, ax_net = plt.subplots(figsize=(6, 5))
+    if len(G.nodes) > 0:
+        pos = nx.spring_layout(G, seed=42)
+        edges = G.edges()
+        weights = [G[u][v]['weight'] for u, v in edges]
+        
+        vmin = min(weights) if weights else 0
+        vmax = max(weights) if weights else 1
+        if vmin == vmax:
+            vmin, vmax = 0, vmax + 1
+
+        nx.draw_networkx_nodes(G, pos, node_color='#2c3e50', node_size=600, ax=ax_net)
+        nx.draw_networkx_labels(G, pos, font_size=8, font_weight="bold", font_color="white", ax=ax_net)
+        
+        edge_plot = nx.draw_networkx_edges(
+            G, pos, edgelist=edges, edge_color=weights,
+            edge_cmap=plt.cm.jet, edge_vmin=vmin, edge_vmax=vmax,
+            width=3, arrows=True, arrowsize=15, ax=ax_net
+        )
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), font_size=7, ax=ax_net)
+        
+        cbar = plt.colorbar(edge_plot, ax=ax_net, fraction=0.046, pad=0.04)
+        cbar.set_label('Perda de Carga Total (mca)', rotation=270, labelpad=15)
+        ax_net.set_title("Esquema da Rede (Mapa de Calor de Perdas)")
+        ax_net.axis('off')
+
+    # 2. Gráfico de Barras Empilhadas
+    fig_bar, ax_bar = plt.subplots(figsize=(6, 5))
+    if not df_resultados.empty:
+        df_resultados.plot.barh(x='Trecho', y=['P. Distr(mca)', 'P. Local(mca)'], 
+                                stacked=True, ax=ax_bar, color=['#3498db', '#e74c3c'])
+        ax_bar.set_title("Composição da Perda de Carga por Ramal")
+        ax_bar.set_xlabel("Perda de Carga (mca)")
+        ax_bar.set_ylabel("")
+        plt.tight_layout()
+
+    with col_d1:
+        st.pyplot(fig_net)
+    with col_d2:
+        st.pyplot(fig_bar)
+
     st.divider()
 
     # --- 4. VERIFICAÇÃO DE PRESSÕES (NBR 5626) ---
@@ -229,7 +268,7 @@ if st.session_state.get("processado", False):
             st.info("Nenhuma conexão selecionada.")
 
     # --- 6. EXPORTAÇÃO PDF ---
-    def gerar_pdf_projeto(df_h, df_b, df_t, df_c, st_bomba):
+    def gerar_pdf_projeto(df_h, df_b, df_t, df_c, st_bomba, f_net, f_bar):
         pdf = FPDF()
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
@@ -300,11 +339,35 @@ if st.session_state.get("processado", False):
                 pdf.cell(40, 8, str(row['Quantidade Total']), border=1, align='C')
                 pdf.ln()
 
+        # Adicionando os Gráficos
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, txt="4. Diagramas Hidraulicos", ln=True, align='C')
+        pdf.ln(5)
+
+        # Salva as figuras em arquivos temporários
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_net:
+            f_net.savefig(tmp_net.name, format="png", bbox_inches="tight", dpi=150)
+            path_net = tmp_net.name
+            
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_bar:
+            f_bar.savefig(tmp_bar.name, format="png", bbox_inches="tight", dpi=150)
+            path_bar = tmp_bar.name
+
+        # Insere imagens no PDF
+        pdf.image(path_net, x=35, y=pdf.get_y(), w=140)
+        pdf.ln(110)
+        pdf.image(path_bar, x=35, y=pdf.get_y(), w=140)
+
+        # Apaga os temporários para não lotar a memória do servidor
+        os.remove(path_net)
+        os.remove(path_bar)
+
         return pdf.output(dest='S').encode('latin-1', errors='replace')
 
-    pdf_bytes = gerar_pdf_projeto(df_resultados, df_balanco, df_tubos, df_conexoes, status_bomba_pdf)
+    pdf_bytes = gerar_pdf_projeto(df_resultados, df_balanco, df_tubos, df_conexoes, status_bomba_pdf, fig_net, fig_bar)
     st.download_button(
-        label="📄 Baixar Relatório Técnico Completo (PDF)",
+        label="📄 Baixar Relatório Técnico Completo (PDF com Diagramas)",
         data=pdf_bytes,
         file_name="projeto_hidraulico_quantitativo.pdf",
         mime="application/pdf",
