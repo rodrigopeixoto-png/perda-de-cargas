@@ -94,7 +94,6 @@ for i, t in enumerate(st.session_state.trechos):
         t["Destino"] = c2.text_input("Destino", t["Destino"], key=f"d_{i}").strip()
         t["Comprimento"] = c3.number_input("Comp. (m)", 0.1, 5000.0, float(t["Comprimento"]), key=f"c_{i}")
         
-        # Lógica inteligente para Diâmetro Nominal vs Interno
         dn_opcoes = [20, 25, 32, 40, 50, 60, 75, 85, 110]
         dn_atual = t.get("DN_Comercial", 60)
         if dn_atual not in dn_opcoes:
@@ -102,7 +101,6 @@ for i, t in enumerate(st.session_state.trechos):
             
         dn_comercial = c4.selectbox("DN Comercial", dn_opcoes, index=dn_opcoes.index(dn_atual), key=f"dn_{i}")
         
-        # Se o usuário mudou o DN comercial, atualiza o Di automaticamente
         if t.get("DN_Comercial") != dn_comercial:
             t["DN_Comercial"] = dn_comercial
             t["Diâmetro"] = DIAMETROS_INTERNOS.get(dn_comercial, dn_comercial)
@@ -143,7 +141,7 @@ if st.session_state.get("processado", False):
         if not t["Origem"] or not t["Destino"]: continue
             
         Q_m3s = t["Vazão"] / 1000
-        D_m = t["Diâmetro"] / 1000  # USA O DIÂMETRO INTERNO PARA O CÁLCULO
+        D_m = t["Diâmetro"] / 1000 
         L_fisico = t["Comprimento"]
         C = MATERIAIS_C.get(t["Material"], 150)
         dn_aprox = get_dn_mais_proximo(t["DN_Comercial"])
@@ -183,18 +181,16 @@ if st.session_state.get("processado", False):
     st.subheader("🗺️ Diagramas de Pressão e Perda de Carga")
     col_d1, col_d2 = st.columns(2)
     
-    # 1. Mapa de Calor da Rede (NetworkX)
     G = nx.DiGraph()
     if not df_resultados.empty:
         for _, row in df_resultados.iterrows():
-            G.add_edge(row["Origem"], row["Destino"], weight=row['Total(mca)'], 
-                       label=f"DN{row['DN']}
-hf={row['Total(mca)']}mca")
+            # Linha corrigida com a quebra de linha (\n)
+            label_text = f"DN{row['DN']}\nhf={row['Total(mca)']}mca"
+            G.add_edge(row["Origem"], row["Destino"], weight=row['Total(mca)'], label=label_text)
     
     fig_net, ax_net = plt.subplots(figsize=(8, 6))
     if len(G.nodes) > 0:
         try:
-            # Algoritmo melhor para evitar cruzamentos em redes (se scipy estiver instalado)
             pos = nx.kamada_kawai_layout(G)
         except:
             pos = nx.spring_layout(G, k=3.0, iterations=100, seed=42)
@@ -232,7 +228,6 @@ hf={row['Total(mca)']}mca")
         ax_net.set_title("Esquema da Rede (Mapa de Calor de Perdas)")
         ax_net.axis('off')
 
-    # 2. Gráfico de Barras Empilhadas
     fig_bar, ax_bar = plt.subplots(figsize=(6, 5))
     if not df_resultados.empty:
         df_resultados.plot.barh(x='Trecho', y=['P. Distr(mca)', 'P. Local(mca)'], 
