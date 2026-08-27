@@ -13,6 +13,13 @@ MATERIAIS_C = {
     "Ferro Fundido": 100, "Aço Galvanizado": 125
 }
 
+# --- DIÂMETROS INTERNOS REAIS (Exemplo p/ PVC Soldável) ---
+# Mapeamento de Diâmetro Nominal (Comercial) para Diâmetro Interno real aproximado (mm)
+DIAMETROS_INTERNOS = {
+    20: 17.0, 25: 21.6, 32: 27.8, 40: 35.2, 
+    50: 44.0, 60: 53.4, 75: 66.6, 85: 75.4, 110: 97.6
+}
+
 # --- CADASTRO DE COMPRIMENTOS EQUIVALENTES (M) ---
 COMPRIMENTOS_EQUIVALENTES = {
     "Cotovelo 90°": {20: 1.2, 25: 1.5, 32: 2.0, 40: 3.2, 50: 3.4, 60: 3.5, 75: 3.8, 85: 4.1, 110: 5.0},
@@ -30,7 +37,7 @@ COMPRIMENTOS_EQUIVALENTES = {
 }
 
 def get_dn_mais_proximo(diametro_informado):
-    dns_disponiveis = [20, 25, 32, 40, 50, 60, 75, 85, 110]
+    dns_disponiveis = list(COMPRIMENTOS_EQUIVALENTES["Cotovelo 90°"].keys())
     return min(dns_disponiveis, key=lambda x: abs(x - diametro_informado))
 
 st.set_page_config(page_title="Simulador de Redes Hidráulicas", layout="wide")
@@ -54,13 +61,13 @@ st.divider()
 
 # --- 2. CONSTRUTOR DINÂMICO DE RAMAIS ---
 st.subheader("✏️ Construtor de Ramais")
-st.info("💡 **Dica:** Para os canos se conectarem no diagrama, o nome do 'Destino' de um trecho deve ser idêntico à 'Origem' do próximo.")
+st.info("💡 **Atenção aos Nomes:** Para que o diagrama desenhe a rede corretamente, o nome do 'Destino' de um trecho deve ser **exatamente igual** ao nome da 'Origem' do trecho seguinte (cuidado com espaços e acentos).")
 
 if 'trechos' not in st.session_state:
-    vazao_inicial_sugerida = (velocidade_entrada * math.pi * ((60/1000)**2) / 4) * 1000
+    vazao_inicial_sugerida = (velocidade_entrada * math.pi * ((53.4/1000)**2) / 4) * 1000
     st.session_state.trechos = [{
-        "Origem": "Rede", "Destino": "Hidrometro", "Comprimento": 15.0,
-        "Diâmetro": 60.0, "Vazão": float(round(vazao_inicial_sugerida, 2)), "Material": "PVC",
+        "Origem": "Rua", "Destino": "Hidrometro", "Comprimento": 15.0,
+        "DN_Comercial": 60, "Diâmetro": 53.4, "Vazão": float(round(vazao_inicial_sugerida, 2)), "Material": "PVC",
         "Conexoes": {k: 0 for k in COMPRIMENTOS_EQUIVALENTES.keys()}
     }]
 
@@ -71,7 +78,7 @@ with col_add:
         ultima_vazao = st.session_state.trechos[-1]["Vazão"] if st.session_state.trechos else 1.0
         st.session_state.trechos.append({
             "Origem": ultimo_destino, "Destino": "", "Comprimento": 10.0,
-            "Diâmetro": 25.0, "Vazão": ultima_vazao, "Material": "PVC",
+            "DN_Comercial": 25, "Diâmetro": 21.6, "Vazão": ultima_vazao, "Material": "PVC",
             "Conexoes": {k: 0 for k in COMPRIMENTOS_EQUIVALENTES.keys()}
         })
         st.rerun()
@@ -82,11 +89,25 @@ with col_rem:
 
 for i, t in enumerate(st.session_state.trechos):
     with st.container(border=True):
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1, c2, c3, c4, c4_2, c5, c6 = st.columns([1.2, 1.2, 0.8, 0.8, 0.8, 0.8, 1.0])
         t["Origem"] = c1.text_input("Origem", t["Origem"], key=f"o_{i}").strip()
         t["Destino"] = c2.text_input("Destino", t["Destino"], key=f"d_{i}").strip()
         t["Comprimento"] = c3.number_input("Comp. (m)", 0.1, 5000.0, float(t["Comprimento"]), key=f"c_{i}")
-        t["Diâmetro"] = c4.number_input("Diâm. (mm)", 1.0, 1000.0, float(t["Diâmetro"]), key=f"di_{i}")
+        
+        # Lógica inteligente para Diâmetro Nominal vs Interno
+        dn_opcoes = [20, 25, 32, 40, 50, 60, 75, 85, 110]
+        dn_atual = t.get("DN_Comercial", 60)
+        if dn_atual not in dn_opcoes:
+            dn_atual = get_dn_mais_proximo(dn_atual)
+            
+        dn_comercial = c4.selectbox("DN Comercial", dn_opcoes, index=dn_opcoes.index(dn_atual), key=f"dn_{i}")
+        
+        # Se o usuário mudou o DN comercial, atualiza o Di automaticamente
+        if t.get("DN_Comercial") != dn_comercial:
+            t["DN_Comercial"] = dn_comercial
+            t["Diâmetro"] = DIAMETROS_INTERNOS.get(dn_comercial, dn_comercial)
+            
+        t["Diâmetro"] = c4_2.number_input("Diâm. Interno (mm)", 1.0, 1000.0, float(t["Diâmetro"]), key=f"di_{i}", help="O cálculo hidráulico exige o diâmetro interno real da tubulação.")
         
         if i == 0:
             d_m = t["Diâmetro"] / 1000
@@ -98,7 +119,7 @@ for i, t in enumerate(st.session_state.trechos):
             
         t["Material"] = c6.selectbox("Material", list(MATERIAIS_C.keys()), index=list(MATERIAIS_C.keys()).index(t["Material"]), key=f"m_{i}")
         
-        with st.expander(f"🛠️ Selecionar Conexões ({t['Origem']} -> {t['Destino']}) - DN Aproximado: {get_dn_mais_proximo(t['Diâmetro'])}"):
+        with st.expander(f"🛠️ Selecionar Conexões ({t['Origem']} -> {t['Destino']}) - Tabela Base: DN {get_dn_mais_proximo(t['DN_Comercial'])}"):
             ccols = st.columns(4)
             for j, nome_con in enumerate(COMPRIMENTOS_EQUIVALENTES.keys()):
                 qtd_atual = t.get("Conexoes", {}).get(nome_con, 0)
@@ -122,10 +143,10 @@ if st.session_state.get("processado", False):
         if not t["Origem"] or not t["Destino"]: continue
             
         Q_m3s = t["Vazão"] / 1000
-        D_m = t["Diâmetro"] / 1000
+        D_m = t["Diâmetro"] / 1000  # USA O DIÂMETRO INTERNO PARA O CÁLCULO
         L_fisico = t["Comprimento"]
         C = MATERIAIS_C.get(t["Material"], 150)
-        dn_aprox = get_dn_mais_proximo(t["Diâmetro"])
+        dn_aprox = get_dn_mais_proximo(t["DN_Comercial"])
         
         L_eq_total = 0.0
         for nome_con, qtd in t.get("Conexoes", {}).items():
@@ -142,13 +163,13 @@ if st.session_state.get("processado", False):
         
         resultados.append({
             "Origem": t['Origem'], "Destino": t['Destino'],
-            "Trecho": f"{t['Origem']} -> {t['Destino']}", "Diam(mm)": t["Diâmetro"],
+            "Trecho": f"{t['Origem']} -> {t['Destino']}", "DN": t["DN_Comercial"], "Di(mm)": t["Diâmetro"],
             "Q(L/s)": round(t["Vazão"], 2), "Vel(m/s)": round(v, 2), "Leq(m)": round(L_eq_total, 2),
             "P. Distr(mca)": round(hf_distribuida, 3), "P. Local(mca)": round(hf_localizada, 3), 
             "Total(mca)": round(hf_distribuida + hf_localizada, 3)
         })
 
-        chave_tubo = f"{t['Material']} D={t['Diâmetro']:.1f} mm"
+        chave_tubo = f"{t['Material']} DN {t['DN_Comercial']} (Di {t['Diâmetro']:.1f}mm)"
         tubos_agrupados[chave_tubo] = tubos_agrupados.get(chave_tubo, 0) + L_fisico
         
     df_resultados = pd.DataFrame(resultados)
@@ -167,12 +188,17 @@ if st.session_state.get("processado", False):
     if not df_resultados.empty:
         for _, row in df_resultados.iterrows():
             G.add_edge(row["Origem"], row["Destino"], weight=row['Total(mca)'], 
-                       label=f"D={row['Diam(mm)']}\nhf={row['Total(mca)']}mca")
+                       label=f"DN{row['DN']}
+hf={row['Total(mca)']}mca")
     
-    fig_net, ax_net = plt.subplots(figsize=(8, 6)) # Área maior do gráfico
+    fig_net, ax_net = plt.subplots(figsize=(8, 6))
     if len(G.nodes) > 0:
-        # k controla a distância ideal entre os nós (força repulsiva)
-        pos = nx.spring_layout(G, k=3.0, iterations=100, seed=42) 
+        try:
+            # Algoritmo melhor para evitar cruzamentos em redes (se scipy estiver instalado)
+            pos = nx.kamada_kawai_layout(G)
+        except:
+            pos = nx.spring_layout(G, k=3.0, iterations=100, seed=42)
+            
         edges = G.edges()
         weights = [G[u][v]['weight'] for u, v in edges]
         
@@ -181,11 +207,9 @@ if st.session_state.get("processado", False):
         if vmin == vmax:
             vmin, vmax = 0, vmax + 1
 
-        # Nós MENORES
         nx.draw_networkx_nodes(G, pos, node_color='#ecf0f1', edgecolors='#bdc3c7', node_size=150, ax=ax_net)
         
-        # Títulos FORA dos nós (deslocados para cima)
-        pos_labels = {node: (coords[0], coords[1] + 0.12) for node, coords in pos.items()}
+        pos_labels = {node: (coords[0], coords[1] + 0.1) for node, coords in pos.items()}
         nx.draw_networkx_labels(G, pos_labels, font_size=9, font_weight="bold", font_color="black", ax=ax_net)
         
         nx.draw_networkx_edges(
@@ -194,7 +218,6 @@ if st.session_state.get("processado", False):
             width=3, arrows=True, arrowsize=15, ax=ax_net
         )
         
-        # Fundo branco nos rótulos das tubulações para legibilidade
         bbox_props = dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85)
         nx.draw_networkx_edge_labels(
             G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), 
@@ -294,13 +317,13 @@ if st.session_state.get("processado", False):
         pdf.cell(0, 8, txt="1. Resumo de Perda de Carga", ln=True)
         pdf.set_font("Arial", size=9)
         pdf.cell(40, 8, "Trecho", border=1, align='C')
-        pdf.cell(20, 8, "Diam(mm)", border=1, align='C')
+        pdf.cell(20, 8, "Di(mm)", border=1, align='C')
         pdf.cell(20, 8, "Vel(m/s)", border=1, align='C')
         pdf.cell(30, 8, "Total(mca)", border=1, align='C')
         pdf.ln()
         for _, row in df_h.iterrows():
             pdf.cell(40, 8, str(row['Trecho']), border=1, align='C')
-            pdf.cell(20, 8, str(row['Diam(mm)']), border=1, align='C')
+            pdf.cell(20, 8, str(row['Di(mm)']), border=1, align='C')
             pdf.cell(20, 8, str(row['Vel(m/s)']), border=1, align='C')
             pdf.cell(30, 8, str(row['Total(mca)']), border=1, align='C')
             pdf.ln()
@@ -332,7 +355,7 @@ if st.session_state.get("processado", False):
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(0, 8, txt="3. Lista de Materiais (Quantitativo)", ln=True)
         pdf.set_font("Arial", 'B', 10)
-        pdf.cell(80, 8, "Tubulacao (Material/Diam)", border=1)
+        pdf.cell(80, 8, "Tubulacao (Material/DN)", border=1)
         pdf.cell(40, 8, "Metragem (m)", border=1, align='C')
         pdf.ln()
         pdf.set_font("Arial", size=9)
