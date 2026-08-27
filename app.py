@@ -32,7 +32,7 @@ with col_e2:
     )
     k_entrada = float(tipo_entrada.split("K=")[1].replace(")", ""))
 with col_e3:
-    velocidade_entrada = st.number_input("Velocidade no Alimentador (m/s) - Base", min_value=0.1, value=1.5, help="Usado apenas para sugerir a vazão inicial.")
+    velocidade_entrada = st.number_input("Velocidade no Alimentador (m/s)", min_value=0.1, value=1.5, help="Calcula a vazão inicial baseada no diâmetro do 1º trecho.")
 
 st.divider()
 
@@ -40,8 +40,7 @@ st.divider()
 st.subheader("✏️ Construtor de Ramais")
 
 if 'trechos' not in st.session_state:
-    # Calcula a vazão inicial baseada na velocidade sugerida e diâmetro de 60mm
-    vazao_inicial_sugerida = (1.5 * math.pi * ((60/1000)**2) / 4) * 1000
+    vazao_inicial_sugerida = (velocidade_entrada * math.pi * ((60/1000)**2) / 4) * 1000
     st.session_state.trechos = [{
         "Origem": "Rua", "Destino": "Hidrometro", "Comprimento": 15.0,
         "Diâmetro": 60.0, "Vazão": float(round(vazao_inicial_sugerida, 2)), "Material": "PVC",
@@ -51,7 +50,6 @@ if 'trechos' not in st.session_state:
 col_add, col_rem = st.columns([1, 5])
 with col_add:
     if st.button("➕ Adicionar Ramal", type="primary"):
-        # Herda automaticamente os dados do último trecho para agilizar o preenchimento
         ultimo_destino = st.session_state.trechos[-1]["Destino"] if st.session_state.trechos else ""
         ultima_vazao = st.session_state.trechos[-1]["Vazão"] if st.session_state.trechos else 1.0
         
@@ -73,7 +71,18 @@ for i, t in enumerate(st.session_state.trechos):
         t["Destino"] = c2.text_input("Destino", t["Destino"], key=f"d_{i}")
         t["Comprimento"] = c3.number_input("Comp. (m)", 0.1, 5000.0, float(t["Comprimento"]), key=f"c_{i}")
         t["Diâmetro"] = c4.number_input("Diâm. (mm)", 1.0, 1000.0, float(t["Diâmetro"]), key=f"di_{i}")
-        t["Vazão"] = c5.number_input("Vazão (L/s)", 0.01, 1000.0, float(t["Vazão"]), key=f"v_{i}")
+        
+        # --- LÓGICA DE VAZÃO RESTAURADA ---
+        # O primeiro trecho (Alimentador) tem a vazão calculada e bloqueada
+        if i == 0:
+            d_m = t["Diâmetro"] / 1000
+            vazao_calc = (velocidade_entrada * math.pi * (d_m**2) / 4) * 1000
+            t["Vazão"] = float(vazao_calc)
+            c5.number_input("Vazão (L/s)", value=float(t["Vazão"]), key=f"v_{i}_calc", disabled=True, help="Calculada automaticamente: V x A.")
+        else:
+            # Os demais ramais ficam livres para você digitar
+            t["Vazão"] = c5.number_input("Vazão (L/s)", 0.01, 1000.0, float(t["Vazão"]), key=f"v_{i}")
+            
         t["Material"] = c6.selectbox("Material", list(MATERIAIS_C.keys()), index=list(MATERIAIS_C.keys()).index(t["Material"]), key=f"m_{i}")
         
         with st.expander(f"🛠️ Selecionar Conexões do Ramal ({t['Origem']} -> {t['Destino']})"):
@@ -112,7 +121,6 @@ if st.button("🚀 Processar Simulação Completa", type="primary", use_containe
             "P. Local(mca)": round(hl, 3), "Total(mca)": round(hf + hl, 3)
         })
 
-        # Evitando o uso do caractere especial Ø no agrupamento para o PDF
         chave_tubo = f"{t['Material']} D={t['Diâmetro']:.1f} mm"
         tubos_agrupados[chave_tubo] = tubos_agrupados.get(chave_tubo, 0) + L
 
@@ -236,7 +244,7 @@ if st.button("🚀 Processar Simulação Completa", type="primary", use_containe
             pdf.ln()
             pdf.set_font("Arial", size=9)
             for _, row in df_c.iterrows():
-                # Removendo caracteres especiais dos nomes das conexões para o PDF
+                # Removendo caracteres especiais dos nomes das conexões para não quebrar o PDF
                 nome_conexao = str(row['Conexão']).replace('°', ' graus').replace('ê', 'e')
                 pdf.cell(80, 8, nome_conexao, border=1)
                 pdf.cell(40, 8, str(row['Quantidade Total']), border=1, align='C')
