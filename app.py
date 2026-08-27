@@ -179,18 +179,17 @@ if st.session_state.get("processado", False):
         if vmin == vmax:
             vmin, vmax = 0, vmax + 1
 
-        nx.draw_networkx_nodes(G, pos, node_color='#2c3e50', node_size=600, ax=ax_net)
-        nx.draw_networkx_labels(G, pos, font_size=8, font_weight="bold", font_color="white", ax=ax_net)
+        # CORREÇÃO DA COR: Nó mais claro e texto na cor preta para melhor legibilidade
+        nx.draw_networkx_nodes(G, pos, node_color='#ecf0f1', edgecolors='#bdc3c7', node_size=600, ax=ax_net)
+        nx.draw_networkx_labels(G, pos, font_size=8, font_weight="bold", font_color="black", ax=ax_net)
         
         nx.draw_networkx_edges(
             G, pos, edgelist=edges, edge_color=weights,
             edge_cmap=plt.cm.jet, edge_vmin=vmin, edge_vmax=vmax,
             width=3, arrows=True, arrowsize=15, ax=ax_net
         )
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), font_size=7, ax=ax_net)
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), font_size=7, font_color="black", ax=ax_net)
         
-        # --- CORREÇÃO DO COLORBAR ---
-        # Cria um objeto mapeador genérico (ScalarMappable) para não travar com as setas
         sm = plt.cm.ScalarMappable(cmap=plt.cm.jet, norm=plt.Normalize(vmin=vmin, vmax=vmax))
         sm.set_array([]) 
         
