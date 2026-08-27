@@ -14,7 +14,6 @@ MATERIAIS_C = {
 }
 
 # --- DIÂMETROS INTERNOS REAIS (Exemplo p/ PVC Soldável) ---
-# Mapeamento de Diâmetro Nominal (Comercial) para Diâmetro Interno real aproximado (mm)
 DIAMETROS_INTERNOS = {
     20: 17.0, 25: 21.6, 32: 27.8, 40: 35.2, 
     50: 44.0, 60: 53.4, 75: 66.6, 85: 75.4, 110: 97.6
@@ -61,7 +60,7 @@ st.divider()
 
 # --- 2. CONSTRUTOR DINÂMICO DE RAMAIS ---
 st.subheader("✏️ Construtor de Ramais")
-st.info("💡 **Atenção aos Nomes:** Para que o diagrama desenhe a rede corretamente, o nome do 'Destino' de um trecho deve ser **exatamente igual** ao nome da 'Origem' do trecho seguinte (cuidado com espaços e acentos).")
+st.info("💡 **Atenção aos Nomes:** Para que o diagrama desenhe a rede corretamente, o nome do 'Destino' de um trecho deve ser **exatamente igual** ao nome da 'Origem' do trecho seguinte.")
 
 if 'trechos' not in st.session_state:
     vazao_inicial_sugerida = (velocidade_entrada * math.pi * ((53.4/1000)**2) / 4) * 1000
@@ -105,7 +104,7 @@ for i, t in enumerate(st.session_state.trechos):
             t["DN_Comercial"] = dn_comercial
             t["Diâmetro"] = DIAMETROS_INTERNOS.get(dn_comercial, dn_comercial)
             
-        t["Diâmetro"] = c4_2.number_input("Diâm. Interno (mm)", 1.0, 1000.0, float(t["Diâmetro"]), key=f"di_{i}", help="O cálculo hidráulico exige o diâmetro interno real da tubulação.")
+        t["Diâmetro"] = c4_2.number_input("Diâm. Interno (mm)", 1.0, 1000.0, float(t["Diâmetro"]), key=f"di_{i}")
         
         if i == 0:
             d_m = t["Diâmetro"] / 1000
@@ -117,7 +116,7 @@ for i, t in enumerate(st.session_state.trechos):
             
         t["Material"] = c6.selectbox("Material", list(MATERIAIS_C.keys()), index=list(MATERIAIS_C.keys()).index(t["Material"]), key=f"m_{i}")
         
-        with st.expander(f"🛠️ Selecionar Conexões ({t['Origem']} -> {t['Destino']}) - Tabela Base: DN {get_dn_mais_proximo(t['DN_Comercial'])}"):
+        with st.expander(f"🛠️ Selecionar Conexões ({t['Origem']} -> {t['Destino']}) - DN {get_dn_mais_proximo(t['DN_Comercial'])}"):
             ccols = st.columns(4)
             for j, nome_con in enumerate(COMPRIMENTOS_EQUIVALENTES.keys()):
                 qtd_atual = t.get("Conexoes", {}).get(nome_con, 0)
@@ -155,6 +154,7 @@ if st.session_state.get("processado", False):
         area = math.pi * (D_m ** 2) / 4
         v = Q_m3s / area if area > 0 else 0
         
+        # Hazen-Williams
         fator_hw = 10.67 * (Q_m3s ** 1.852) / ((C ** 1.852) * (D_m ** 4.87)) if D_m > 0 else 0
         hf_distribuida = fator_hw * L_fisico
         hf_localizada = fator_hw * L_eq_total
@@ -162,7 +162,8 @@ if st.session_state.get("processado", False):
         resultados.append({
             "Origem": t['Origem'], "Destino": t['Destino'],
             "Trecho": f"{t['Origem']} -> {t['Destino']}", "DN": t["DN_Comercial"], "Di(mm)": t["Diâmetro"],
-            "Q(L/s)": round(t["Vazão"], 2), "Vel(m/s)": round(v, 2), "Leq(m)": round(L_eq_total, 2),
+            "Q(L/s)": round(t["Vazão"], 2), "Vel(m/s)": round(v, 2), 
+            "L.Fis.(m)": round(L_fisico, 2), "Leq(m)": round(L_eq_total, 2), "L.Tot.(m)": round(L_fisico + L_eq_total, 2),
             "P. Distr(mca)": round(hf_distribuida, 3), "P. Local(mca)": round(hf_localizada, 3), 
             "Total(mca)": round(hf_distribuida + hf_localizada, 3)
         })
@@ -174,7 +175,15 @@ if st.session_state.get("processado", False):
     df_tubos = pd.DataFrame(list(tubos_agrupados.items()), columns=["Especificação", "Comprimento Físico (m)"])
     df_conexoes = pd.DataFrame([(k, v) for k, v in conexoes_totais.items() if v > 0], columns=["Conexão", "Quantidade Total"])
     
-    st.subheader("📋 Resumo Hidráulico")
+    # --- MEMÓRIA DE CÁLCULO (UI) ---
+    st.subheader("📚 Memória de Cálculo e Tabela de Perda de Carga")
+    with st.expander("Ver Fórmulas Utilizadas (Hazen-Williams)"):
+        st.markdown("**Velocidade de Escoamento (Equação da Continuidade):**")
+        st.latex(r"V = \frac{4 \cdot Q}{\pi \cdot D^2}")
+        st.markdown("**Perda de Carga Distribuída e Localizada (Hazen-Williams c/ Comprimento Equivalente):**")
+        st.latex(r"hf = 10,67 \cdot L_{total} \cdot \frac{Q^{1,852}}{C^{1,852} \cdot D^{4,87}}")
+        st.markdown("*Onde $L_{total} = L_{fisico} + L_{eq}$*")
+
     st.dataframe(df_resultados.drop(columns=['Origem', 'Destino']), use_container_width=True)
 
     # --- DIAGRAMAS (ESTILO EPANET) OTIMIZADOS ---
@@ -184,7 +193,6 @@ if st.session_state.get("processado", False):
     G = nx.DiGraph()
     if not df_resultados.empty:
         for _, row in df_resultados.iterrows():
-            # Linha corrigida com a quebra de linha (\n)
             label_text = f"DN{row['DN']}\nhf={row['Total(mca)']}mca"
             G.add_edge(row["Origem"], row["Destino"], weight=row['Total(mca)'], label=label_text)
     
@@ -302,31 +310,49 @@ if st.session_state.get("processado", False):
 
     # --- 6. EXPORTAÇÃO PDF ---
     def gerar_pdf_projeto(df_h, df_b, df_t, df_c, st_bomba, f_net, f_bar):
-        pdf = FPDF()
+        pdf = FPDF(orientation='L') # Paisagem para caber a tabela inteira
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, txt="Relatorio Tecnico - Rede Hidraulica", ln=True, align='C')
+        pdf.cell(0, 10, txt="Relatorio Tecnico e Memoria de Calculo - Rede Hidraulica", ln=True, align='C')
         pdf.ln(5)
         
+        # MEMÓRIA DE CÁLCULO
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, txt="1. Resumo de Perda de Carga", ln=True)
+        pdf.cell(0, 8, txt="1. Fórmulas (Metodo Hazen-Williams e Comprimentos Equivalentes)", ln=True)
         pdf.set_font("Arial", size=9)
-        pdf.cell(40, 8, "Trecho", border=1, align='C')
-        pdf.cell(20, 8, "Di(mm)", border=1, align='C')
-        pdf.cell(20, 8, "Vel(m/s)", border=1, align='C')
-        pdf.cell(30, 8, "Total(mca)", border=1, align='C')
+        pdf.multi_cell(0, 6, txt="Velocidade (m/s): V = (4 * Q) / (pi * Di^2)\nPerda de Carga Total (mca): hf = 10.67 * L_tot * (Q^1.852) / (C^1.852 * Di^4.87)\nOnde L_tot = Comprimento Fisico (L) + Comprimento Equivalente das Conexoes (Leq)")
+        pdf.ln(5)
+
+        # TABELA DE PERDA DE CARGA
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 8, txt="2. Tabela Detalhada de Perda de Carga por Trecho", ln=True)
+        pdf.set_font("Arial", size=8) # Fonte reduzida para caber
+        
+        cols_w = [35, 12, 12, 15, 15, 15, 15, 18, 18, 18]
+        headers = ["Trecho", "Di(mm)", "Q(L/s)", "V(m/s)", "L.Fis(m)", "Leq(m)", "L.Tot(m)", "P.Dist(mca)", "P.Loc(mca)", "Total(mca)"]
+        
+        for w, h in zip(cols_w, headers):
+            pdf.cell(w, 8, h, border=1, align='C')
         pdf.ln()
+        
         for _, row in df_h.iterrows():
-            pdf.cell(40, 8, str(row['Trecho']), border=1, align='C')
-            pdf.cell(20, 8, str(row['Di(mm)']), border=1, align='C')
-            pdf.cell(20, 8, str(row['Vel(m/s)']), border=1, align='C')
-            pdf.cell(30, 8, str(row['Total(mca)']), border=1, align='C')
+            pdf.cell(cols_w[0], 8, str(row['Trecho']), border=1, align='C')
+            pdf.cell(cols_w[1], 8, str(row['Di(mm)']), border=1, align='C')
+            pdf.cell(cols_w[2], 8, str(row['Q(L/s)']), border=1, align='C')
+            pdf.cell(cols_w[3], 8, str(row['Vel(m/s)']), border=1, align='C')
+            pdf.cell(cols_w[4], 8, str(row['L.Fis.(m)']), border=1, align='C')
+            pdf.cell(cols_w[5], 8, str(row['Leq(m)']), border=1, align='C')
+            pdf.cell(cols_w[6], 8, str(row['L.Tot.(m)']), border=1, align='C')
+            pdf.cell(cols_w[7], 8, str(row['P. Distr(mca)']), border=1, align='C')
+            pdf.cell(cols_w[8], 8, str(row['P. Local(mca)']), border=1, align='C')
+            pdf.cell(cols_w[9], 8, str(row['Total(mca)']), border=1, align='C')
             pdf.ln()
             
-        pdf.ln(5)
+        pdf.ln(8)
         
+        # VERIFICAÇÃO NBR 5626
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, txt="2. Verificacao de Pressoes (NBR 5626)", ln=True)
+        pdf.cell(0, 8, txt="3. Verificacao de Pressoes (NBR 5626)", ln=True)
         pdf.set_font("Arial", size=9)
         pdf.cell(40, 8, "P. Concessionaria", border=1, align='C')
         pdf.cell(30, 8, "Desnivel (m)", border=1, align='C')
@@ -345,34 +371,9 @@ if st.session_state.get("processado", False):
         
         pdf.set_font("Arial", size=10)
         pdf.cell(0, 8, txt=st_bomba, ln=True)
-        pdf.ln(5)
-
-        pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, txt="3. Lista de Materiais (Quantitativo)", ln=True)
-        pdf.set_font("Arial", 'B', 10)
-        pdf.cell(80, 8, "Tubulacao (Material/DN)", border=1)
-        pdf.cell(40, 8, "Metragem (m)", border=1, align='C')
-        pdf.ln()
-        pdf.set_font("Arial", size=9)
-        for _, row in df_t.iterrows():
-            pdf.cell(80, 8, str(row['Especificação']), border=1)
-            pdf.cell(40, 8, f"{row['Comprimento Físico (m)']:.2f}", border=1, align='C')
-            pdf.ln()
-            
-        pdf.ln(3)
-        if not df_c.empty:
-            pdf.set_font("Arial", 'B', 10)
-            pdf.cell(80, 8, "Conexao", border=1)
-            pdf.cell(40, 8, "Quantidade", border=1, align='C')
-            pdf.ln()
-            pdf.set_font("Arial", size=9)
-            for _, row in df_c.iterrows():
-                nome_conexao = str(row['Conexão']).replace('°', ' graus').replace('ê', 'e').replace('ç', 'c').replace('ã', 'a')
-                pdf.cell(80, 8, nome_conexao, border=1)
-                pdf.cell(40, 8, str(row['Quantidade Total']), border=1, align='C')
-                pdf.ln()
-
-        pdf.add_page()
+        
+        # DIAGRAMAS
+        pdf.add_page(orientation='P') # Volta para retrato
         pdf.set_font("Arial", 'B', 14)
         pdf.cell(0, 10, txt="4. Diagramas Hidraulicos", ln=True, align='C')
         pdf.ln(5)
