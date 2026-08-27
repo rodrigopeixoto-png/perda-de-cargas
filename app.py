@@ -32,7 +32,7 @@ with col_e2:
     )
     k_entrada = float(tipo_entrada.split("K=")[1].replace(")", ""))
 with col_e3:
-    velocidade_entrada = st.number_input("Velocidade no Alimentador (m/s)", min_value=0.1, value=1.5, help="Define a vazão inicial baseada no diâmetro do primeiro trecho.")
+    velocidade_entrada = st.number_input("Velocidade no Alimentador (m/s) - Base", min_value=0.1, value=1.5, help="Usado apenas para sugerir a vazão inicial.")
 
 st.divider()
 
@@ -40,18 +40,24 @@ st.divider()
 st.subheader("✏️ Construtor de Ramais")
 
 if 'trechos' not in st.session_state:
+    # Calcula a vazão inicial baseada na velocidade sugerida e diâmetro de 60mm
+    vazao_inicial_sugerida = (1.5 * math.pi * ((60/1000)**2) / 4) * 1000
     st.session_state.trechos = [{
-        "Origem": "Rua", "Destino": "A", "Comprimento": 15.0,
-        "Diâmetro": 60.0, "Vazão": 0.0, "Material": "PVC",
+        "Origem": "Rua", "Destino": "Hidrometro", "Comprimento": 15.0,
+        "Diâmetro": 60.0, "Vazão": float(round(vazao_inicial_sugerida, 2)), "Material": "PVC",
         "Conexoes": {k: 0 for k in CONEXOES_K.keys()}
     }]
 
 col_add, col_rem = st.columns([1, 5])
 with col_add:
     if st.button("➕ Adicionar Ramal", type="primary"):
+        # Herda automaticamente os dados do último trecho para agilizar o preenchimento
+        ultimo_destino = st.session_state.trechos[-1]["Destino"] if st.session_state.trechos else ""
+        ultima_vazao = st.session_state.trechos[-1]["Vazão"] if st.session_state.trechos else 1.0
+        
         st.session_state.trechos.append({
-            "Origem": "", "Destino": "", "Comprimento": 10.0,
-            "Diâmetro": 25.0, "Vazão": 1.0, "Material": "PVC",
+            "Origem": ultimo_destino, "Destino": "", "Comprimento": 10.0,
+            "Diâmetro": 25.0, "Vazão": ultima_vazao, "Material": "PVC",
             "Conexoes": {k: 0 for k in CONEXOES_K.keys()}
         })
         st.rerun()
@@ -67,19 +73,10 @@ for i, t in enumerate(st.session_state.trechos):
         t["Destino"] = c2.text_input("Destino", t["Destino"], key=f"d_{i}")
         t["Comprimento"] = c3.number_input("Comp. (m)", 0.1, 5000.0, float(t["Comprimento"]), key=f"c_{i}")
         t["Diâmetro"] = c4.number_input("Diâm. (mm)", 1.0, 1000.0, float(t["Diâmetro"]), key=f"di_{i}")
-        
-        # O primeiro trecho (Alimentador) tem a vazão calculada automaticamente
-        if i == 0:
-            d_m = t["Diâmetro"] / 1000
-            vazao_calc = (velocidade_entrada * math.pi * (d_m**2) / 4) * 1000
-            t["Vazão"] = float(vazao_calc)
-            c5.number_input("Vazão (L/s)", value=float(t["Vazão"]), key=f"v_{i}_calc", disabled=True, help="Calculada automaticamente pela velocidade x área.")
-        else:
-            t["Vazão"] = c5.number_input("Vazão (L/s)", 0.01, 1000.0, float(t["Vazão"]), key=f"v_{i}")
-            
+        t["Vazão"] = c5.number_input("Vazão (L/s)", 0.01, 1000.0, float(t["Vazão"]), key=f"v_{i}")
         t["Material"] = c6.selectbox("Material", list(MATERIAIS_C.keys()), index=list(MATERIAIS_C.keys()).index(t["Material"]), key=f"m_{i}")
         
-        with st.expander(f"🛠️ Selecionar Conexões do Ramal ({t['Origem']} ➔ {t['Destino']})"):
+        with st.expander(f"🛠️ Selecionar Conexões do Ramal ({t['Origem']} -> {t['Destino']})"):
             ccols = st.columns(4)
             for j, (nome_con, k_val) in enumerate(CONEXOES_K.items()):
                 qtd = ccols[j % 4].number_input(f"{nome_con}", 0, 50, t.get("Conexoes", {}).get(nome_con, 0), key=f"cx_{i}_{nome_con}")
@@ -110,12 +107,13 @@ if st.button("🚀 Processar Simulação Completa", type="primary", use_containe
         hl = soma_k * (v ** 2) / (2 * 9.81)
         
         resultados.append({
-            "Trecho": f"{t['Origem']} ➔ {t['Destino']}", "Diam(mm)": t["Diâmetro"],
+            "Trecho": f"{t['Origem']} -> {t['Destino']}", "Diam(mm)": t["Diâmetro"],
             "Q(L/s)": round(t["Vazão"], 2), "Vel(m/s)": round(v, 2), "P. Distr(mca)": round(hf, 3),
             "P. Local(mca)": round(hl, 3), "Total(mca)": round(hf + hl, 3)
         })
 
-        chave_tubo = f"{t['Material']} Ø {t['Diâmetro']:.1f} mm"
+        # Evitando o uso do caractere especial Ø no agrupamento para o PDF
+        chave_tubo = f"{t['Material']} D={t['Diâmetro']:.1f} mm"
         tubos_agrupados[chave_tubo] = tubos_agrupados.get(chave_tubo, 0) + L
 
         for nome, qtd in t["Conexoes"].items():
@@ -134,7 +132,7 @@ if st.button("🚀 Processar Simulação Completa", type="primary", use_containe
         G = nx.DiGraph()
         for t in st.session_state.trechos:
             if t["Origem"] and t["Destino"]:
-                G.add_edge(t["Origem"], t["Destino"], label=f"Ø{t['Diâmetro']}")
+                G.add_edge(t["Origem"], t["Destino"], label=f"D={t['Diâmetro']}")
         if len(G.nodes) > 0:
             fig, ax = plt.subplots(figsize=(4, 4))
             pos = nx.spring_layout(G)
@@ -164,13 +162,13 @@ if st.button("🚀 Processar Simulação Completa", type="primary", use_containe
         st.write(f"**Energia Total Exigida:** {pressao_necessaria:.2f} mca")
         
         if amt_bomba <= 0:
-            status_bomba = f"Escoamento Natural. Pressao residual: {abs(amt_bomba):.2f} mca"
+            status_bomba_pdf = f"Escoamento Natural. Pressao residual: {abs(amt_bomba):.2f} mca"
             potencia_cv = 0
-            st.success(f"✅ **{status_bomba}**")
+            st.success(f"✅ **Escoamento Natural:** Pressão residual de {abs(amt_bomba):.2f} mca.")
         else:
             potencia_cv = ((vazao_alimentador / 1000) * amt_bomba * 1000) / (75 * rendimento)
-            status_bomba = f"Bomba Necessaria - AMT: {amt_bomba:.2f} mca | Pot: {potencia_cv:.2f} cv"
-            st.error(f"**Bomba Necessária:** AMT: {amt_bomba:.2f} mca | Potência: {potencia_cv:.2f} cv")
+            status_bomba_pdf = f"Bomba Necessaria - AMT: {amt_bomba:.2f} mca | Pot: {potencia_cv:.2f} cv"
+            st.error(f"⚠️ **Bomba Necessária:** AMT: {amt_bomba:.2f} mca | Potência: {potencia_cv:.2f} cv")
 
     st.divider()
 
@@ -187,7 +185,7 @@ if st.button("🚀 Processar Simulação Completa", type="primary", use_containe
         else:
             st.info("Nenhuma conexão selecionada.")
 
-    # --- 6. EXPORTAÇÃO PDF ---
+    # --- 6. EXPORTAÇÃO PDF COM CARACTERES CORRIGIDOS ---
     def gerar_pdf_projeto(df_h, df_t, df_c, st_bomba):
         pdf = FPDF()
         pdf.add_page()
@@ -238,13 +236,15 @@ if st.button("🚀 Processar Simulação Completa", type="primary", use_containe
             pdf.ln()
             pdf.set_font("Arial", size=9)
             for _, row in df_c.iterrows():
-                pdf.cell(80, 8, str(row['Conexão']), border=1)
+                # Removendo caracteres especiais dos nomes das conexões para o PDF
+                nome_conexao = str(row['Conexão']).replace('°', ' graus').replace('ê', 'e')
+                pdf.cell(80, 8, nome_conexao, border=1)
                 pdf.cell(40, 8, str(row['Quantidade Total']), border=1, align='C')
                 pdf.ln()
 
-        return pdf.output(dest='S').encode('latin-1')
+        return pdf.output(dest='S').encode('latin-1', errors='replace')
 
-    pdf_bytes = gerar_pdf_projeto(df_resultados, df_tubos, df_conexoes, status_bomba)
+    pdf_bytes = gerar_pdf_projeto(df_resultados, df_tubos, df_conexoes, status_bomba_pdf)
     st.download_button(
         label="📄 Baixar Relatório Técnico Completo (PDF)",
         data=pdf_bytes,
