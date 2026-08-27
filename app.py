@@ -54,11 +54,12 @@ st.divider()
 
 # --- 2. CONSTRUTOR DINÂMICO DE RAMAIS ---
 st.subheader("✏️ Construtor de Ramais")
+st.info("💡 **Dica:** Para os canos se conectarem no diagrama, o nome do 'Destino' de um trecho deve ser idêntico à 'Origem' do próximo.")
 
 if 'trechos' not in st.session_state:
     vazao_inicial_sugerida = (velocidade_entrada * math.pi * ((60/1000)**2) / 4) * 1000
     st.session_state.trechos = [{
-        "Origem": "Rua", "Destino": "Hidrometro", "Comprimento": 15.0,
+        "Origem": "Rede", "Destino": "Hidrometro", "Comprimento": 15.0,
         "Diâmetro": 60.0, "Vazão": float(round(vazao_inicial_sugerida, 2)), "Material": "PVC",
         "Conexoes": {k: 0 for k in COMPRIMENTOS_EQUIVALENTES.keys()}
     }]
@@ -82,8 +83,8 @@ with col_rem:
 for i, t in enumerate(st.session_state.trechos):
     with st.container(border=True):
         c1, c2, c3, c4, c5, c6 = st.columns(6)
-        t["Origem"] = c1.text_input("Origem", t["Origem"], key=f"o_{i}")
-        t["Destino"] = c2.text_input("Destino", t["Destino"], key=f"d_{i}")
+        t["Origem"] = c1.text_input("Origem", t["Origem"], key=f"o_{i}").strip()
+        t["Destino"] = c2.text_input("Destino", t["Destino"], key=f"d_{i}").strip()
         t["Comprimento"] = c3.number_input("Comp. (m)", 0.1, 5000.0, float(t["Comprimento"]), key=f"c_{i}")
         t["Diâmetro"] = c4.number_input("Diâm. (mm)", 1.0, 1000.0, float(t["Diâmetro"]), key=f"di_{i}")
         
@@ -157,7 +158,7 @@ if st.session_state.get("processado", False):
     st.subheader("📋 Resumo Hidráulico")
     st.dataframe(df_resultados.drop(columns=['Origem', 'Destino']), use_container_width=True)
 
-    # --- DIAGRAMAS (ESTILO EPANET) ---
+    # --- DIAGRAMAS (ESTILO EPANET) OTIMIZADOS ---
     st.subheader("🗺️ Diagramas de Pressão e Perda de Carga")
     col_d1, col_d2 = st.columns(2)
     
@@ -168,9 +169,10 @@ if st.session_state.get("processado", False):
             G.add_edge(row["Origem"], row["Destino"], weight=row['Total(mca)'], 
                        label=f"D={row['Diam(mm)']}\nhf={row['Total(mca)']}mca")
     
-    fig_net, ax_net = plt.subplots(figsize=(6, 5))
+    fig_net, ax_net = plt.subplots(figsize=(8, 6)) # Área maior do gráfico
     if len(G.nodes) > 0:
-        pos = nx.spring_layout(G, seed=42)
+        # k controla a distância ideal entre os nós (força repulsiva)
+        pos = nx.spring_layout(G, k=3.0, iterations=100, seed=42) 
         edges = G.edges()
         weights = [G[u][v]['weight'] for u, v in edges]
         
@@ -179,16 +181,25 @@ if st.session_state.get("processado", False):
         if vmin == vmax:
             vmin, vmax = 0, vmax + 1
 
-        # CORREÇÃO DA COR: Nó mais claro e texto na cor preta para melhor legibilidade
-        nx.draw_networkx_nodes(G, pos, node_color='#ecf0f1', edgecolors='#bdc3c7', node_size=600, ax=ax_net)
-        nx.draw_networkx_labels(G, pos, font_size=8, font_weight="bold", font_color="black", ax=ax_net)
+        # Nós MENORES
+        nx.draw_networkx_nodes(G, pos, node_color='#ecf0f1', edgecolors='#bdc3c7', node_size=150, ax=ax_net)
+        
+        # Títulos FORA dos nós (deslocados para cima)
+        pos_labels = {node: (coords[0], coords[1] + 0.12) for node, coords in pos.items()}
+        nx.draw_networkx_labels(G, pos_labels, font_size=9, font_weight="bold", font_color="black", ax=ax_net)
         
         nx.draw_networkx_edges(
             G, pos, edgelist=edges, edge_color=weights,
             edge_cmap=plt.cm.jet, edge_vmin=vmin, edge_vmax=vmax,
             width=3, arrows=True, arrowsize=15, ax=ax_net
         )
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), font_size=7, font_color="black", ax=ax_net)
+        
+        # Fundo branco nos rótulos das tubulações para legibilidade
+        bbox_props = dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85)
+        nx.draw_networkx_edge_labels(
+            G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), 
+            font_size=7, font_color="black", bbox=bbox_props, ax=ax_net
+        )
         
         sm = plt.cm.ScalarMappable(cmap=plt.cm.jet, norm=plt.Normalize(vmin=vmin, vmax=vmax))
         sm.set_array([]) 
