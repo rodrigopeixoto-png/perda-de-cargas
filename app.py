@@ -49,10 +49,9 @@ with col_e1:
     pressao_rua = st.number_input("Pressão Disponível na Rua (mca)", min_value=0.0, value=15.0)
 with col_e2:
     tipo_entrada = st.selectbox(
-        "Estrutura do Cavalete / Hidrômetro", 
-        ["Ligação Direta (K=0.0)", "Hidrômetro Padrão 1/2\" (K=15.0)", "Hidrômetro Padrão 3/4\" (K=10.0)", "Hidrômetro Woltmann 2\" (K=4.0)"]
+        "Estrutura do Cavalete / Hidrômetro (Apenas Registro)", 
+        ["Ligação Direta", "Hidrômetro Padrão 1/2\"", "Hidrômetro Padrão 3/4\"", "Hidrômetro Woltmann 2\""]
     )
-    k_entrada = float(tipo_entrada.split("K=")[1].replace(")", ""))
 with col_e3:
     velocidade_entrada = st.number_input("Velocidade no Alimentador (m/s)", min_value=0.1, value=1.5)
 
@@ -110,7 +109,6 @@ for i, t in enumerate(st.session_state.trechos):
             d_m = t["Diâmetro"] / 1000
             vazao_calc = (velocidade_entrada * math.pi * (d_m**2) / 4) * 1000
             t["Vazão"] = float(vazao_calc)
-            # Força renderização dinâmica para burlar o cache usando key única baseada na própria vazão
             c5.number_input("Vazão (L/s)", value=float(t["Vazão"]), key=f"v_{i}_calc_{t['Vazão']:.3f}", disabled=True)
         else:
             t["Vazão"] = c5.number_input("Vazão (L/s)", 0.01, 1000.0, float(t["Vazão"]), key=f"v_{i}")
@@ -240,19 +238,16 @@ if st.session_state.get("processado", False):
     with col_v2: pressao_req = st.number_input("Pressão Mínima Requerida (mca)", min_value=0.0, value=1.0)
     with col_v3: rendimento = st.slider("Rendimento da Bomba (%)", 10, 100, 75) / 100.0
 
-    v_inicial = df_resultados['Vel(m/s)'].iloc[0] if not df_resultados.empty else 0
-    perda_entrada_mca = k_entrada * (v_inicial ** 2) / (2 * 9.81)
     perda_rede = df_resultados['Total(mca)'].sum() if not df_resultados.empty else 0
     vazao_alimentador = df_resultados['Q(L/s)'].iloc[0] if not df_resultados.empty else 0
     
-    pressao_disp_resultante = pressao_rua - desnivel - (perda_rede + perda_entrada_mca)
+    pressao_disp_resultante = pressao_rua - desnivel - perda_rede
     balanco = pressao_disp_resultante - pressao_req
 
     df_balanco = pd.DataFrame([{
         "P. Concessionária": round(pressao_rua, 2),
         "Desnível (m)": round(desnivel, 2),
         "Perda Rede (mca)": round(perda_rede, 2),
-        "Perda Cavalete (mca)": round(perda_entrada_mca, 2),
         "P. Disp. Result.": round(pressao_disp_resultante, 2),
         "P. Req.": round(pressao_req, 2),
         "Balanço": round(balanco, 2)
@@ -320,23 +315,21 @@ if st.session_state.get("processado", False):
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(0, 8, txt="2. Verificacao de Pressoes (NBR 5626)", ln=True)
         pdf.set_font("Arial", size=9)
-        pdf.cell(30, 8, "P. Conc.", border=1, align='C')
-        pdf.cell(25, 8, "Desnivel", border=1, align='C')
-        pdf.cell(25, 8, "Perda Rede", border=1, align='C')
-        pdf.cell(30, 8, "Perda Cavalete", border=1, align='C')
-        pdf.cell(25, 8, "P. Disp.", border=1, align='C')
-        pdf.cell(25, 8, "P. Req.", border=1, align='C')
-        pdf.cell(25, 8, "Balanco", border=1, align='C')
+        pdf.cell(40, 8, "P. Conc.", border=1, align='C')
+        pdf.cell(30, 8, "Desnivel", border=1, align='C')
+        pdf.cell(30, 8, "Perda Rede", border=1, align='C')
+        pdf.cell(30, 8, "P. Disp.", border=1, align='C')
+        pdf.cell(30, 8, "P. Req.", border=1, align='C')
+        pdf.cell(30, 8, "Balanco", border=1, align='C')
         pdf.ln()
         
         b = df_b.iloc[0]
-        pdf.cell(30, 8, str(b["P. Concessionária"]), border=1, align='C')
-        pdf.cell(25, 8, str(b["Desnível (m)"]), border=1, align='C')
-        pdf.cell(25, 8, str(b["Perda Rede (mca)"]), border=1, align='C')
-        pdf.cell(30, 8, str(b["Perda Cavalete (mca)"]), border=1, align='C')
-        pdf.cell(25, 8, str(b["P. Disp. Result."]), border=1, align='C')
-        pdf.cell(25, 8, str(b["P. Req."]), border=1, align='C')
-        pdf.cell(25, 8, str(b["Balanço"]), border=1, align='C')
+        pdf.cell(40, 8, str(b["P. Concessionária"]), border=1, align='C')
+        pdf.cell(30, 8, str(b["Desnível (m)"]), border=1, align='C')
+        pdf.cell(30, 8, str(b["Perda Rede (mca)"]), border=1, align='C')
+        pdf.cell(30, 8, str(b["P. Disp. Result."]), border=1, align='C')
+        pdf.cell(30, 8, str(b["P. Req."]), border=1, align='C')
+        pdf.cell(30, 8, str(b["Balanço"]), border=1, align='C')
         pdf.ln(8)
         
         pdf.set_font("Arial", size=10)
