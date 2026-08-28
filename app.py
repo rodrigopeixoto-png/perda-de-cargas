@@ -159,6 +159,7 @@ if st.session_state.get("processado", False):
         resultados.append({
             "Origem": t['Origem'], "Destino": t['Destino'],
             "Trecho": f"{t['Origem']} -> {t['Destino']}", "DN": t["DN_Comercial"], "Di(mm)": t["Diâmetro"],
+            "C": C, # Salvando o C para a Memória de Cálculo
             "Q(L/s)": round(t["Vazão"], 2), "Vel(m/s)": round(v, 2), 
             "L.Fis(m)": round(L_fisico, 2), "Leq(m)": round(L_eq_total, 2), "L.Tot(m)": round(L_fisico + L_eq_total, 2),
             "P. Distr(mca)": round(hf_distribuida, 3), "P. Local(mca)": round(hf_localizada, 3), 
@@ -179,7 +180,7 @@ if st.session_state.get("processado", False):
         st.markdown("**Perda de Carga Distribuída e Localizada (Hazen-Williams):**")
         st.latex(r"hf = 10,67 \cdot L_{total} \cdot \frac{Q^{1,852}}{C^{1,852} \cdot D^{4,87}}")
 
-    st.dataframe(df_resultados.drop(columns=['Origem', 'Destino']), use_container_width=True)
+    st.dataframe(df_resultados.drop(columns=['Origem', 'Destino', 'C']), use_container_width=True)
 
     st.subheader("🗺️ Diagramas de Pressão e Perda de Carga")
     col_d1, col_d2 = st.columns(2)
@@ -286,23 +287,48 @@ if st.session_state.get("processado", False):
         pdf.cell(0, 10, txt="Relatorio Tecnico e Memoria de Calculo", ln=True, align='C')
         pdf.ln(5)
 
-        # 1. MEMÓRIA DE CÁLCULO NO PDF
+        # 1. MEMÓRIA DE CÁLCULO E METODOLOGIA
         pdf.set_font("Arial", 'B', 11)
         pdf.cell(0, 8, txt="1. Memoria de Calculo e Metodologia", ln=True)
         pdf.set_font("Arial", size=9)
         txt_memoria = (
             "A metodologia de calculo adota a equacao universal de Hazen-Williams para perda de carga distribuida e "
             "o Metodo dos Comprimentos Equivalentes (Leq) para perdas localizadas.\n\n"
-            "Velocidade de Escoamento (m/s): V = (4 * Q) / (pi * Di^2)\n"
+            "Velocidade de Escoamento (m/s): V = (4 * Q) / (3.1416 * Di^2)\n"
             "Perda de Carga Total (mca): hf = 10.67 * L_tot * (Q^1.852) / (C^1.852 * Di^4.87)\n"
             "Onde L_tot = Comprimento Fisico (L) + Somatorio dos Comprimentos Equivalentes (Leq)."
         )
-        pdf.multi_cell(0, 6, txt=txt_memoria)
+        pdf.multi_cell(0, 5, txt=txt_memoria)
         pdf.ln(5)
-        
-        # 2. TABELA DE PERDA DE CARGA
+
+        # 2. DETALHAMENTO DE CÁLCULO (Passo a Passo)
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, txt="2. Tabela Detalhada de Perda de Carga por Trecho", ln=True)
+        pdf.cell(0, 8, txt="2. Detalhamento dos Calculos por Trecho (Passo a Passo)", ln=True)
+        for _, row in df_h.iterrows():
+            pdf.set_font("Arial", 'B', 9)
+            pdf.cell(0, 6, txt=f"Trecho: {row['Trecho']} (Material C={row['C']})", ln=True)
+            pdf.set_font("Arial", '', 9)
+            
+            q_m3s = row['Q(L/s)'] / 1000
+            d_m = row['Di(mm)'] / 1000
+            c_val = row['C']
+            l_fis = row['L.Fis(m)']
+            l_eq = row['Leq(m)']
+            
+            calc_text = (
+                f"   V = (4 * {q_m3s:.5f}) / (3.1416 * {d_m:.4f}^2) = {row['Vel(m/s)']} m/s\n"
+                f"   hf_dist = 10.67 * {l_fis} * ({q_m3s:.5f}^1.852) / ({c_val}^1.852 * {d_m:.4f}^4.87) = {row['P. Distr(mca)']} mca\n"
+                f"   hf_loc = 10.67 * {l_eq} * ({q_m3s:.5f}^1.852) / ({c_val}^1.852 * {d_m:.4f}^4.87) = {row['P. Local(mca)']} mca\n"
+                f"   hf_total = {row['P. Distr(mca)']} + {row['P. Local(mca)']} = {row['Total(mca)']} mca"
+            )
+            pdf.multi_cell(0, 5, txt=calc_text)
+            pdf.ln(2)
+        
+        pdf.ln(3)
+
+        # 3. TABELA DE PERDA DE CARGA
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 8, txt="3. Tabela Resumo de Perda de Carga", ln=True)
         pdf.set_font("Arial", size=8) 
         
         cols_w = [35, 15, 15, 15, 20, 20, 20, 25, 25, 25]
@@ -325,11 +351,11 @@ if st.session_state.get("processado", False):
             pdf.cell(cols_w[9], 8, str(row['Total(mca)']), border=1, align='C')
             pdf.ln()
             
-        pdf.ln(8)
+        pdf.add_page(orientation='P') # Nova pagina Retrato para os proximos itens
         
-        # 3. VERIFICAÇÃO NBR 5626
+        # 4. VERIFICAÇÃO NBR 5626
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, txt="3. Verificacao de Pressoes (NBR 5626)", ln=True)
+        pdf.cell(0, 8, txt="4. Verificacao de Pressoes (NBR 5626)", ln=True)
         pdf.set_font("Arial", size=9)
         pdf.cell(30, 8, "P. Conc.", border=1, align='C')
         pdf.cell(25, 8, "Desnivel", border=1, align='C')
@@ -350,11 +376,39 @@ if st.session_state.get("processado", False):
         
         pdf.set_font("Arial", size=10)
         pdf.cell(0, 8, txt=st_bomba, ln=True)
-        
-        # 4. DIAGRAMAS
-        pdf.add_page(orientation='P') 
+        pdf.ln(5)
+
+        # 5. LISTA DE MATERIAIS
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 8, txt="5. Lista de Materiais (Quantitativo)", ln=True)
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(80, 8, "Tubulacao (Material/DN)", border=1)
+        pdf.cell(40, 8, "Metragem (m)", border=1, align='C')
+        pdf.ln()
+        pdf.set_font("Arial", size=9)
+        for _, row in df_t.iterrows():
+            pdf.cell(80, 8, str(row['Especificação']), border=1)
+            pdf.cell(40, 8, f"{row['Comprimento Físico (m)']:.2f}", border=1, align='C')
+            pdf.ln()
+            
+        pdf.ln(3)
+        if not df_c.empty:
+            pdf.set_font("Arial", 'B', 10)
+            pdf.cell(80, 8, "Conexao", border=1)
+            pdf.cell(40, 8, "Quantidade", border=1, align='C')
+            pdf.ln()
+            pdf.set_font("Arial", size=9)
+            for _, row in df_c.iterrows():
+                nome_conexao = str(row['Conexão']).replace('°', ' graus').replace('ê', 'e').replace('ç', 'c').replace('ã', 'a')
+                pdf.cell(80, 8, nome_conexao, border=1)
+                pdf.cell(40, 8, str(row['Quantidade Total']), border=1, align='C')
+                pdf.ln()
+
+        pdf.ln(5)
+
+        # 6. DIAGRAMAS
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, txt="4. Diagramas Hidraulicos", ln=True, align='C')
+        pdf.cell(0, 10, txt="6. Diagramas Hidraulicos", ln=True, align='C')
         pdf.ln(5)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_net:
