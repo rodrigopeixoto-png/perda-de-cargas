@@ -110,7 +110,8 @@ for i, t in enumerate(st.session_state.trechos):
             d_m = t["Diâmetro"] / 1000
             vazao_calc = (velocidade_entrada * math.pi * (d_m**2) / 4) * 1000
             t["Vazão"] = float(vazao_calc)
-            c5.number_input("Vazão (L/s)", value=float(t["Vazão"]), key=f"v_{i}_calc", disabled=True)
+            # Força renderização dinâmica para burlar o cache usando key única baseada na própria vazão
+            c5.number_input("Vazão (L/s)", value=float(t["Vazão"]), key=f"v_{i}_calc_{t['Vazão']:.3f}", disabled=True)
         else:
             t["Vazão"] = c5.number_input("Vazão (L/s)", 0.01, 1000.0, float(t["Vazão"]), key=f"v_{i}")
             
@@ -154,7 +155,6 @@ if st.session_state.get("processado", False):
         area = math.pi * (D_m ** 2) / 4
         v = Q_m3s / area if area > 0 else 0
         
-        # Hazen-Williams
         fator_hw = 10.67 * (Q_m3s ** 1.852) / ((C ** 1.852) * (D_m ** 4.87)) if D_m > 0 else 0
         hf_distribuida = fator_hw * L_fisico
         hf_localizada = fator_hw * L_eq_total
@@ -163,7 +163,7 @@ if st.session_state.get("processado", False):
             "Origem": t['Origem'], "Destino": t['Destino'],
             "Trecho": f"{t['Origem']} -> {t['Destino']}", "DN": t["DN_Comercial"], "Di(mm)": t["Diâmetro"],
             "Q(L/s)": round(t["Vazão"], 2), "Vel(m/s)": round(v, 2), 
-            "L.Fis.(m)": round(L_fisico, 2), "Leq(m)": round(L_eq_total, 2), "L.Tot.(m)": round(L_fisico + L_eq_total, 2),
+            "L.Fis(m)": round(L_fisico, 2), "Leq(m)": round(L_eq_total, 2), "L.Tot(m)": round(L_fisico + L_eq_total, 2),
             "P. Distr(mca)": round(hf_distribuida, 3), "P. Local(mca)": round(hf_localizada, 3), 
             "Total(mca)": round(hf_distribuida + hf_localizada, 3)
         })
@@ -175,18 +175,15 @@ if st.session_state.get("processado", False):
     df_tubos = pd.DataFrame(list(tubos_agrupados.items()), columns=["Especificação", "Comprimento Físico (m)"])
     df_conexoes = pd.DataFrame([(k, v) for k, v in conexoes_totais.items() if v > 0], columns=["Conexão", "Quantidade Total"])
     
-    # --- MEMÓRIA DE CÁLCULO (UI) ---
     st.subheader("📚 Memória de Cálculo e Tabela de Perda de Carga")
     with st.expander("Ver Fórmulas Utilizadas (Hazen-Williams)"):
-        st.markdown("**Velocidade de Escoamento (Equação da Continuidade):**")
+        st.markdown("**Velocidade de Escoamento:**")
         st.latex(r"V = \frac{4 \cdot Q}{\pi \cdot D^2}")
-        st.markdown("**Perda de Carga Distribuída e Localizada (Hazen-Williams c/ Comprimento Equivalente):**")
+        st.markdown("**Perda de Carga Distribuída e Localizada (Hazen-Williams):**")
         st.latex(r"hf = 10,67 \cdot L_{total} \cdot \frac{Q^{1,852}}{C^{1,852} \cdot D^{4,87}}")
-        st.markdown("*Onde $L_{total} = L_{fisico} + L_{eq}$*")
 
     st.dataframe(df_resultados.drop(columns=['Origem', 'Destino']), use_container_width=True)
 
-    # --- DIAGRAMAS (ESTILO EPANET) OTIMIZADOS ---
     st.subheader("🗺️ Diagramas de Pressão e Perda de Carga")
     col_d1, col_d2 = st.columns(2)
     
@@ -205,80 +202,60 @@ if st.session_state.get("processado", False):
             
         edges = G.edges()
         weights = [G[u][v]['weight'] for u, v in edges]
-        
         vmin = min(weights) if weights else 0
         vmax = max(weights) if weights else 1
-        if vmin == vmax:
-            vmin, vmax = 0, vmax + 1
+        if vmin == vmax: vmin, vmax = 0, vmax + 1
 
         nx.draw_networkx_nodes(G, pos, node_color='#ecf0f1', edgecolors='#bdc3c7', node_size=150, ax=ax_net)
-        
         pos_labels = {node: (coords[0], coords[1] + 0.1) for node, coords in pos.items()}
         nx.draw_networkx_labels(G, pos_labels, font_size=9, font_weight="bold", font_color="black", ax=ax_net)
         
-        nx.draw_networkx_edges(
-            G, pos, edgelist=edges, edge_color=weights,
-            edge_cmap=plt.cm.jet, edge_vmin=vmin, edge_vmax=vmax,
-            width=3, arrows=True, arrowsize=15, ax=ax_net
-        )
+        nx.draw_networkx_edges(G, pos, edgelist=edges, edge_color=weights, edge_cmap=plt.cm.jet, edge_vmin=vmin, edge_vmax=vmax, width=3, arrows=True, arrowsize=15, ax=ax_net)
         
         bbox_props = dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.85)
-        nx.draw_networkx_edge_labels(
-            G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), 
-            font_size=7, font_color="black", bbox=bbox_props, ax=ax_net
-        )
+        nx.draw_networkx_edge_labels(G, pos, edge_labels=nx.get_edge_attributes(G, 'label'), font_size=7, font_color="black", bbox=bbox_props, ax=ax_net)
         
         sm = plt.cm.ScalarMappable(cmap=plt.cm.jet, norm=plt.Normalize(vmin=vmin, vmax=vmax))
         sm.set_array([]) 
-        
         cbar = plt.colorbar(sm, ax=ax_net, fraction=0.046, pad=0.04)
         cbar.set_label('Perda de Carga Total (mca)', rotation=270, labelpad=15)
-        ax_net.set_title("Esquema da Rede (Mapa de Calor de Perdas)")
         ax_net.axis('off')
 
     fig_bar, ax_bar = plt.subplots(figsize=(6, 5))
     if not df_resultados.empty:
-        df_resultados.plot.barh(x='Trecho', y=['P. Distr(mca)', 'P. Local(mca)'], 
-                                stacked=True, ax=ax_bar, color=['#3498db', '#e74c3c'])
+        df_resultados.plot.barh(x='Trecho', y=['P. Distr(mca)', 'P. Local(mca)'], stacked=True, ax=ax_bar, color=['#3498db', '#e74c3c'])
         ax_bar.set_title("Composição da Perda de Carga por Ramal")
         ax_bar.set_xlabel("Perda de Carga (mca)")
         ax_bar.set_ylabel("")
         plt.tight_layout()
 
-    with col_d1:
-        st.pyplot(fig_net)
-    with col_d2:
-        st.pyplot(fig_bar)
+    with col_d1: st.pyplot(fig_net)
+    with col_d2: st.pyplot(fig_bar)
 
     st.divider()
 
-    # --- 4. VERIFICAÇÃO DE PRESSÕES (NBR 5626) ---
     st.subheader("⚖️ Verificação de Pressões e Balanço Hidráulico")
-    
     col_v1, col_v2, col_v3 = st.columns(3)
-    with col_v1:
-        desnivel = st.number_input("Desnível Geométrico (m)", min_value=0.0, value=10.0)
-    with col_v2:
-        pressao_req = st.number_input("Pressão Mínima Requerida (mca)", min_value=0.0, value=1.0)
-    with col_v3:
-        rendimento = st.slider("Rendimento da Bomba (%)", 10, 100, 75) / 100.0
+    with col_v1: desnivel = st.number_input("Desnível Geométrico (m)", min_value=0.0, value=10.0)
+    with col_v2: pressao_req = st.number_input("Pressão Mínima Requerida (mca)", min_value=0.0, value=1.0)
+    with col_v3: rendimento = st.slider("Rendimento da Bomba (%)", 10, 100, 75) / 100.0
 
     v_inicial = df_resultados['Vel(m/s)'].iloc[0] if not df_resultados.empty else 0
     perda_entrada_mca = k_entrada * (v_inicial ** 2) / (2 * 9.81)
     perda_rede = df_resultados['Total(mca)'].sum() if not df_resultados.empty else 0
     vazao_alimentador = df_resultados['Q(L/s)'].iloc[0] if not df_resultados.empty else 0
-    perda_total_dh = perda_rede + perda_entrada_mca
     
-    pressao_disp_resultante = pressao_rua - desnivel - perda_total_dh
+    pressao_disp_resultante = pressao_rua - desnivel - (perda_rede + perda_entrada_mca)
     balanco = pressao_disp_resultante - pressao_req
 
     df_balanco = pd.DataFrame([{
-        "Pressão Concessionária (m.c.a)": round(pressao_rua, 2),
-        "Desnível Geométrico (m)": round(desnivel, 2),
-        "Perda de Carga dH (m.c.a)": round(perda_total_dh, 2),
-        "Pressão Disp. Resultante (m.c.a)": round(pressao_disp_resultante, 2),
-        "Pressão Mín. Requerida (m.c.a)": round(pressao_req, 2),
-        "Balanço NBR 5626 (m.c.a)": round(balanco, 2)
+        "P. Concessionária": round(pressao_rua, 2),
+        "Desnível (m)": round(desnivel, 2),
+        "Perda Rede (mca)": round(perda_rede, 2),
+        "Perda Cavalete (mca)": round(perda_entrada_mca, 2),
+        "P. Disp. Result.": round(pressao_disp_resultante, 2),
+        "P. Req.": round(pressao_req, 2),
+        "Balanço": round(balanco, 2)
     }])
 
     st.dataframe(df_balanco, use_container_width=True, hide_index=True)
@@ -295,11 +272,10 @@ if st.session_state.get("processado", False):
 
     st.divider()
 
-    # --- 5. LISTA DE MATERIAIS ---
     st.subheader("📦 Quantitativo de Materiais")
     col_m1, col_m2 = st.columns(2)
     with col_m1:
-        st.write("**Tubulação por Material e Diâmetro (Apenas Extensão Física)**")
+        st.write("**Tubulação por Material e Diâmetro**")
         st.dataframe(df_tubos, use_container_width=True, hide_index=True)
     with col_m2:
         st.write("**Total de Conexões**")
@@ -308,27 +284,18 @@ if st.session_state.get("processado", False):
         else:
             st.info("Nenhuma conexão selecionada.")
 
-    # --- 6. EXPORTAÇÃO PDF ---
     def gerar_pdf_projeto(df_h, df_b, df_t, df_c, st_bomba, f_net, f_bar):
-        pdf = FPDF(orientation='L') # Paisagem para caber a tabela inteira
+        pdf = FPDF(orientation='L') 
         pdf.add_page()
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, txt="Relatorio Tecnico e Memoria de Calculo - Rede Hidraulica", ln=True, align='C')
+        pdf.cell(0, 10, txt="Relatorio Tecnico e Memoria de Calculo", ln=True, align='C')
         pdf.ln(5)
         
-        # MEMÓRIA DE CÁLCULO
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, txt="1. Fórmulas (Metodo Hazen-Williams e Comprimentos Equivalentes)", ln=True)
-        pdf.set_font("Arial", size=9)
-        pdf.multi_cell(0, 6, txt="Velocidade (m/s): V = (4 * Q) / (pi * Di^2)\nPerda de Carga Total (mca): hf = 10.67 * L_tot * (Q^1.852) / (C^1.852 * Di^4.87)\nOnde L_tot = Comprimento Fisico (L) + Comprimento Equivalente das Conexoes (Leq)")
-        pdf.ln(5)
-
-        # TABELA DE PERDA DE CARGA
-        pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, txt="2. Tabela Detalhada de Perda de Carga por Trecho", ln=True)
-        pdf.set_font("Arial", size=8) # Fonte reduzida para caber
+        pdf.cell(0, 8, txt="1. Tabela Detalhada de Perda de Carga por Trecho", ln=True)
+        pdf.set_font("Arial", size=8) 
         
-        cols_w = [35, 12, 12, 15, 15, 15, 15, 18, 18, 18]
+        cols_w = [35, 15, 15, 15, 20, 20, 20, 25, 25, 25]
         headers = ["Trecho", "Di(mm)", "Q(L/s)", "V(m/s)", "L.Fis(m)", "Leq(m)", "L.Tot(m)", "P.Dist(mca)", "P.Loc(mca)", "Total(mca)"]
         
         for w, h in zip(cols_w, headers):
@@ -340,9 +307,9 @@ if st.session_state.get("processado", False):
             pdf.cell(cols_w[1], 8, str(row['Di(mm)']), border=1, align='C')
             pdf.cell(cols_w[2], 8, str(row['Q(L/s)']), border=1, align='C')
             pdf.cell(cols_w[3], 8, str(row['Vel(m/s)']), border=1, align='C')
-            pdf.cell(cols_w[4], 8, str(row['L.Fis.(m)']), border=1, align='C')
+            pdf.cell(cols_w[4], 8, str(row['L.Fis(m)']), border=1, align='C')
             pdf.cell(cols_w[5], 8, str(row['Leq(m)']), border=1, align='C')
-            pdf.cell(cols_w[6], 8, str(row['L.Tot.(m)']), border=1, align='C')
+            pdf.cell(cols_w[6], 8, str(row['L.Tot(m)']), border=1, align='C')
             pdf.cell(cols_w[7], 8, str(row['P. Distr(mca)']), border=1, align='C')
             pdf.cell(cols_w[8], 8, str(row['P. Local(mca)']), border=1, align='C')
             pdf.cell(cols_w[9], 8, str(row['Total(mca)']), border=1, align='C')
@@ -350,32 +317,34 @@ if st.session_state.get("processado", False):
             
         pdf.ln(8)
         
-        # VERIFICAÇÃO NBR 5626
         pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, txt="3. Verificacao de Pressoes (NBR 5626)", ln=True)
+        pdf.cell(0, 8, txt="2. Verificacao de Pressoes (NBR 5626)", ln=True)
         pdf.set_font("Arial", size=9)
-        pdf.cell(40, 8, "P. Concessionaria", border=1, align='C')
-        pdf.cell(30, 8, "Desnivel (m)", border=1, align='C')
-        pdf.cell(30, 8, "Perda dH (mca)", border=1, align='C')
-        pdf.cell(30, 8, "P. Disp Result", border=1, align='C')
-        pdf.cell(30, 8, "Balanco NBR", border=1, align='C')
+        pdf.cell(30, 8, "P. Conc.", border=1, align='C')
+        pdf.cell(25, 8, "Desnivel", border=1, align='C')
+        pdf.cell(25, 8, "Perda Rede", border=1, align='C')
+        pdf.cell(30, 8, "Perda Cavalete", border=1, align='C')
+        pdf.cell(25, 8, "P. Disp.", border=1, align='C')
+        pdf.cell(25, 8, "P. Req.", border=1, align='C')
+        pdf.cell(25, 8, "Balanco", border=1, align='C')
         pdf.ln()
         
         b = df_b.iloc[0]
-        pdf.cell(40, 8, str(b["Pressão Concessionária (m.c.a)"]), border=1, align='C')
-        pdf.cell(30, 8, str(b["Desnível Geométrico (m)"]), border=1, align='C')
-        pdf.cell(30, 8, str(b["Perda de Carga dH (m.c.a)"]), border=1, align='C')
-        pdf.cell(30, 8, str(b["Pressão Disp. Resultante (m.c.a)"]), border=1, align='C')
-        pdf.cell(30, 8, str(b["Balanço NBR 5626 (m.c.a)"]), border=1, align='C')
+        pdf.cell(30, 8, str(b["P. Concessionária"]), border=1, align='C')
+        pdf.cell(25, 8, str(b["Desnível (m)"]), border=1, align='C')
+        pdf.cell(25, 8, str(b["Perda Rede (mca)"]), border=1, align='C')
+        pdf.cell(30, 8, str(b["Perda Cavalete (mca)"]), border=1, align='C')
+        pdf.cell(25, 8, str(b["P. Disp. Result."]), border=1, align='C')
+        pdf.cell(25, 8, str(b["P. Req."]), border=1, align='C')
+        pdf.cell(25, 8, str(b["Balanço"]), border=1, align='C')
         pdf.ln(8)
         
         pdf.set_font("Arial", size=10)
         pdf.cell(0, 8, txt=st_bomba, ln=True)
         
-        # DIAGRAMAS
-        pdf.add_page(orientation='P') # Volta para retrato
+        pdf.add_page(orientation='P') 
         pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, txt="4. Diagramas Hidraulicos", ln=True, align='C')
+        pdf.cell(0, 10, txt="3. Diagramas Hidraulicos", ln=True, align='C')
         pdf.ln(5)
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_net:
@@ -397,7 +366,7 @@ if st.session_state.get("processado", False):
 
     pdf_bytes = gerar_pdf_projeto(df_resultados, df_balanco, df_tubos, df_conexoes, status_bomba_pdf, fig_net, fig_bar)
     st.download_button(
-        label="📄 Baixar Relatório Técnico Completo (PDF com Diagramas)",
+        label="📄 Baixar Relatório Técnico Completo (PDF)",
         data=pdf_bytes,
         file_name="projeto_hidraulico_quantitativo.pdf",
         mime="application/pdf",
