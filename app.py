@@ -59,7 +59,6 @@ st.divider()
 
 # --- 2. CONSTRUTOR DINÂMICO DE RAMAIS ---
 st.subheader("✏️ Construtor de Ramais")
-st.info("💡 **Atenção aos Nomes:** Para que o diagrama desenhe a rede corretamente, o nome do 'Destino' de um trecho deve ser **exatamente igual** ao nome da 'Origem' do trecho seguinte.")
 
 if 'trechos' not in st.session_state:
     vazao_inicial_sugerida = (velocidade_entrada * math.pi * ((53.4/1000)**2) / 4) * 1000
@@ -271,6 +270,116 @@ if st.session_state.get("processado", False):
     col_m1, col_m2 = st.columns(2)
     with col_m1:
         st.write("**Tubulação por Material e Diâmetro**")
-        st.dataframeFico feliz que esteja de acordo! Como esta é uma nova sessão e não tenho acesso ao histórico do nosso cálculo anterior, você poderia me enviar os dados, a fórmula ou o contexto do que estávamos calculando?
+        st.dataframe(df_tubos, use_container_width=True, hide_index=True)
+    with col_m2:
+        st.write("**Total de Conexões**")
+        if not df_conexoes.empty:
+            st.dataframe(df_conexoes, use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhuma conexão selecionada.")
 
-Assim que você me repassar essas informações, estruturo imediatamente a memória de cálculo passo a passo e a rotina metodológica adotada para você anexar ao seu relatório. O que estávamos calculando?
+    # --- 6. EXPORTAÇÃO PDF ---
+    def gerar_pdf_projeto(df_h, df_b, df_t, df_c, st_bomba, f_net, f_bar):
+        pdf = FPDF(orientation='L') 
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, txt="Relatorio Tecnico e Memoria de Calculo", ln=True, align='C')
+        pdf.ln(5)
+
+        # 1. MEMÓRIA DE CÁLCULO NO PDF
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 8, txt="1. Memoria de Calculo e Metodologia", ln=True)
+        pdf.set_font("Arial", size=9)
+        txt_memoria = (
+            "A metodologia de calculo adota a equacao universal de Hazen-Williams para perda de carga distribuida e "
+            "o Metodo dos Comprimentos Equivalentes (Leq) para perdas localizadas.\n\n"
+            "Velocidade de Escoamento (m/s): V = (4 * Q) / (pi * Di^2)\n"
+            "Perda de Carga Total (mca): hf = 10.67 * L_tot * (Q^1.852) / (C^1.852 * Di^4.87)\n"
+            "Onde L_tot = Comprimento Fisico (L) + Somatorio dos Comprimentos Equivalentes (Leq)."
+        )
+        pdf.multi_cell(0, 6, txt=txt_memoria)
+        pdf.ln(5)
+        
+        # 2. TABELA DE PERDA DE CARGA
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 8, txt="2. Tabela Detalhada de Perda de Carga por Trecho", ln=True)
+        pdf.set_font("Arial", size=8) 
+        
+        cols_w = [35, 15, 15, 15, 20, 20, 20, 25, 25, 25]
+        headers = ["Trecho", "Di(mm)", "Q(L/s)", "V(m/s)", "L.Fis(m)", "Leq(m)", "L.Tot(m)", "P.Dist(mca)", "P.Loc(mca)", "Total(mca)"]
+        
+        for w, h in zip(cols_w, headers):
+            pdf.cell(w, 8, h, border=1, align='C')
+        pdf.ln()
+        
+        for _, row in df_h.iterrows():
+            pdf.cell(cols_w[0], 8, str(row['Trecho']), border=1, align='C')
+            pdf.cell(cols_w[1], 8, str(row['Di(mm)']), border=1, align='C')
+            pdf.cell(cols_w[2], 8, str(row['Q(L/s)']), border=1, align='C')
+            pdf.cell(cols_w[3], 8, str(row['Vel(m/s)']), border=1, align='C')
+            pdf.cell(cols_w[4], 8, str(row['L.Fis(m)']), border=1, align='C')
+            pdf.cell(cols_w[5], 8, str(row['Leq(m)']), border=1, align='C')
+            pdf.cell(cols_w[6], 8, str(row['L.Tot(m)']), border=1, align='C')
+            pdf.cell(cols_w[7], 8, str(row['P. Distr(mca)']), border=1, align='C')
+            pdf.cell(cols_w[8], 8, str(row['P. Local(mca)']), border=1, align='C')
+            pdf.cell(cols_w[9], 8, str(row['Total(mca)']), border=1, align='C')
+            pdf.ln()
+            
+        pdf.ln(8)
+        
+        # 3. VERIFICAÇÃO NBR 5626
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 8, txt="3. Verificacao de Pressoes (NBR 5626)", ln=True)
+        pdf.set_font("Arial", size=9)
+        pdf.cell(30, 8, "P. Conc.", border=1, align='C')
+        pdf.cell(25, 8, "Desnivel", border=1, align='C')
+        pdf.cell(25, 8, "Perda Rede", border=1, align='C')
+        pdf.cell(25, 8, "P. Disp.", border=1, align='C')
+        pdf.cell(25, 8, "P. Req.", border=1, align='C')
+        pdf.cell(25, 8, "Balanco", border=1, align='C')
+        pdf.ln()
+        
+        b = df_b.iloc[0]
+        pdf.cell(30, 8, str(b["P. Concessionária"]), border=1, align='C')
+        pdf.cell(25, 8, str(b["Desnível (m)"]), border=1, align='C')
+        pdf.cell(25, 8, str(b["Perda Rede (mca)"]), border=1, align='C')
+        pdf.cell(25, 8, str(b["P. Disp. Result."]), border=1, align='C')
+        pdf.cell(25, 8, str(b["P. Req."]), border=1, align='C')
+        pdf.cell(25, 8, str(b["Balanço"]), border=1, align='C')
+        pdf.ln(8)
+        
+        pdf.set_font("Arial", size=10)
+        pdf.cell(0, 8, txt=st_bomba, ln=True)
+        
+        # 4. DIAGRAMAS
+        pdf.add_page(orientation='P') 
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, txt="4. Diagramas Hidraulicos", ln=True, align='C')
+        pdf.ln(5)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_net:
+            f_net.savefig(tmp_net.name, format="png", bbox_inches="tight", dpi=150)
+            path_net = tmp_net.name
+            
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp_bar:
+            f_bar.savefig(tmp_bar.name, format="png", bbox_inches="tight", dpi=150)
+            path_bar = tmp_bar.name
+
+        pdf.image(path_net, x=35, y=pdf.get_y(), w=140)
+        pdf.ln(110)
+        pdf.image(path_bar, x=35, y=pdf.get_y(), w=140)
+
+        os.remove(path_net)
+        os.remove(path_bar)
+
+        return pdf.output(dest='S').encode('latin-1', errors='replace')
+
+    pdf_bytes = gerar_pdf_projeto(df_resultados, df_balanco, df_tubos, df_conexoes, status_bomba_pdf, fig_net, fig_bar)
+    st.download_button(
+        label="📄 Baixar Relatório Técnico Completo (PDF)",
+        data=pdf_bytes,
+        file_name="projeto_hidraulico_quantitativo.pdf",
+        mime="application/pdf",
+        type="primary",
+        use_container_width=True
+    )
